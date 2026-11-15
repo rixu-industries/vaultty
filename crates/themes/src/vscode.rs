@@ -214,6 +214,9 @@ fn open(from: &Path) -> Result<(About, Vec<Entry>, Files), String> {
     Ok((about, entries, files))
 }
 
+/// Cap on each JSON file read from a `.vsix`: theme files are far smaller.
+const MAX_JSON: u64 = 4 * 1024 * 1024;
+
 /// Reads the JSON files of a `.vsix` (a zip with the extension inside `extension/`). There are few, and they are small.
 fn vsix(path: &Path) -> Result<Files, String> {
     let bad = |e: &dyn std::fmt::Display| format!("{} is not a valid .vsix: {e}", path.display());
@@ -228,12 +231,22 @@ fn vsix(path: &Path) -> Result<Files, String> {
             continue;
         };
 
-        if !name.ends_with(".json") || entry.size() > 4 * 1024 * 1024 {
+        if !name.ends_with(".json") || entry.size() > MAX_JSON {
             continue;
         }
 
+        // The declared size is not trusted: a crafted zip can expand to far more.
         let mut bytes = Vec::new();
-        entry.read_to_end(&mut bytes).map_err(|e| bad(&e))?;
+        entry
+            .by_ref()
+            .take(MAX_JSON + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| bad(&e))?;
+
+        if bytes.len() as u64 > MAX_JSON {
+            continue;
+        }
+
         files.insert(name, bytes);
     }
 

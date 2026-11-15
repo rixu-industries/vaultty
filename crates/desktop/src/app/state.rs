@@ -20,6 +20,8 @@ use sessions::{Event, Sessions, TabInfo, TabKind};
 use uuid::Uuid;
 use vaults::{VaultItem, VaultView, Vaults};
 
+use crate::app::tabs::{Edge, OpenTab, Scope, Tab, Tabs};
+
 /// List in the sidebar of a vault.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Section {
@@ -37,115 +39,6 @@ pub enum Route {
     Settings,
     /// Licenses, opened from the vault list.
     Licenses,
-}
-
-/// What a tab shows.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Tab {
-    /// Terminal or SFTP from `sessions`: the id is that of its `TabInfo`.
-    Session(Uuid),
-    Host {
-        vault: Uuid,
-        id: Uuid,
-    },
-    Key {
-        vault: Uuid,
-        id: Uuid,
-    },
-    Tunnel {
-        vault: Uuid,
-        id: Uuid,
-    },
-    VaultSettings(Uuid),
-    KnownHosts(Uuid),
-    Settings,
-    /// Help → Open Source Licenses.
-    Licenses,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct OpenTab {
-    /// For sessions, the same id as their `TabInfo`.
-    pub id: Uuid,
-    pub tab: Tab,
-    /// Preview: the next entry that is opened replaces it. It is drawn in italics.
-    pub preview: bool,
-    /// The pane it is in (a leaf of `AppState::panes`).
-    pub pane: Uuid,
-}
-
-/// Split panes, as in Zed: each leaf is a pane with its own tab bar. Moving a tab
-/// to another pane does not touch its view or its session: only `OpenTab::pane` changes.
-#[derive(Clone, PartialEq, Debug)]
-pub enum Pane {
-    Leaf(Uuid),
-    Split {
-        /// One above the other; otherwise, side by side.
-        down: bool,
-        first: Box<Pane>,
-        second: Box<Pane>,
-    },
-}
-
-/// Where a tab is dropped on a pane: on an edge (below, above or to one side, and whether the new
-/// pane goes first) or, with `None`, in the center.
-pub type Edge = Option<(bool, bool)>;
-
-impl Pane {
-    fn leaves(&self, out: &mut Vec<Uuid>) {
-        match self {
-            Pane::Leaf(id) => out.push(*id),
-            Pane::Split { first, second, .. } => {
-                first.leaves(out);
-                second.leaves(out);
-            }
-        }
-    }
-
-    /// What remains when a pane is removed: its sibling takes its place.
-    fn without(self, id: Uuid) -> Option<Pane> {
-        match self {
-            Pane::Leaf(t) => (t != id).then_some(Pane::Leaf(t)),
-            Pane::Split {
-                down,
-                first,
-                second,
-            } => match (first.without(id), second.without(id)) {
-                (Some(a), Some(b)) => Some(Pane::Split {
-                    down,
-                    first: Box::new(a),
-                    second: Box::new(b),
-                }),
-                (a, b) => a.or(b),
-            },
-        }
-    }
-
-    /// Puts the pane `new` next to `target`: below (or above, with `before`) if `down`; otherwise, to the
-    /// right (or to the left).
-    fn insert(self, target: Uuid, new: Uuid, down: bool, before: bool) -> Pane {
-        match self {
-            Pane::Leaf(t) if t == target => {
-                let (a, b) = if before { (new, t) } else { (t, new) };
-
-                Pane::Split {
-                    down,
-                    first: Box::new(Pane::Leaf(a)),
-                    second: Box::new(Pane::Leaf(b)),
-                }
-            }
-            Pane::Split {
-                down: d,
-                first,
-                second,
-            } => Pane::Split {
-                down: d,
-                first: Box::new(first.insert(target, new, down, before)),
-                second: Box::new(second.insert(target, new, down, before)),
-            },
-            other => other,
-        }
-    }
 }
 
 /// Sidebar width: minimum, default and maximum (in `theme::px` units).
@@ -211,23 +104,10 @@ pub struct AppState {
     /// Open vaults whose folder disappeared: the user is warned until they dismiss the notice.
     pub lost: Vec<String>,
     pub route: Route,
-    /// Open tabs, from all vaults, in the order they are shown.
-    pub tabs: Vec<OpenTab>,
+    /// Open tabs, from all vaults, and the panes that hold them.
+    pub tabs: Tabs,
     /// Copy of `sessions.list()`: title and state of each session.
     pub session_list: Vec<TabInfo>,
-    /// The tab being shown (`OpenTab::id`). `None`: the empty state of the section.
-    pub active: Option<Uuid>,
-    /// The tab that was shown in each vault when the user left it, to return to it.
-    last_active: HashMap<Uuid, Uuid>,
-    /// The panes. A single set for all vaults: each vault shows the panes that have its own tabs
-    /// (or global ones), and a pane without any tab disappears.
-    pub panes: Pane,
-    /// The tab each pane shows when the focus is on another pane.
-    pane_active: HashMap<Uuid, Uuid>,
-    /// While a tab is being dragged: the pane and the area under the mouse, to mark where it will go.
-    pub drop_target: Option<(Uuid, Edge)>,
-    /// Names set by hand on tabs (right click → Rename); they take precedence over the title.
-    pub renames: HashMap<Uuid, String>,
     /// Sidebar: whether it is expanded, and its width. Saved in `settings.json`.
     pub layout: Layout,
     pub picking: Option<Picking>,
@@ -264,14 +144,8 @@ impl AppState {
             unlocking: HashSet::new(),
             lost: Vec::new(),
             route: Route::Picker,
-            tabs: Vec::new(),
+            tabs: Tabs::new(),
             session_list: Vec::new(),
-            active: None,
-            last_active: HashMap::new(),
-            panes: Pane::Leaf(Uuid::new_v4()),
-            pane_active: HashMap::new(),
-            drop_target: None,
-            renames: HashMap::new(),
             layout: settings::load::<Layout>("layout").clamped(),
             picking: None,
             collapsed: HashSet::new(),
@@ -314,7 +188,9 @@ impl AppState {
             Event::Queue(tab) => cx.emit(TabEvent::Queue(tab)),
             Event::Reload { tab, side } => cx.emit(TabEvent::Reload { tab, side }),
             Event::Clipboard(text) => {
-                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text))
+                if crate::app::prefs::Prefs::get(cx).terminal.remote_clipboard {
+                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text))
+                }
             }
             Event::VaultChanged(vault) => self.refresh_view(vault, cx),
             Event::Tunnels => cx.notify(),
@@ -326,13 +202,18 @@ impl AppState {
     fn sync_tabs(&mut self, cx: &mut Context<Self>) {
         self.session_list = self.sessions.list();
 
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
+        };
+
         for info in &self.session_list {
-            if !self.tabs.iter().any(|t| t.id == info.id) {
-                self.tabs.push(OpenTab {
+            if !self.tabs.list.iter().any(|t| t.id == info.id) {
+                self.tabs.list.push(OpenTab {
                     id: info.id,
                     tab: Tab::Session(info.id),
                     preview: false,
-                    pane: self.target_pane(),
+                    pane: self.tabs.target_pane(scope),
                 });
             }
         }
@@ -340,12 +221,13 @@ impl AppState {
         let list = &self.session_list;
         let gone: Vec<Uuid> = self
             .tabs
+            .list
             .iter()
             .filter(|t| matches!(t.tab, Tab::Session(id) if !list.iter().any(|i| i.id == id)))
             .map(|t| t.id)
             .collect();
 
-        self.remove_tabs(&gone);
+        self.tabs.remove(&gone, scope);
         cx.notify();
     }
 
@@ -368,19 +250,24 @@ impl AppState {
         let after = self.current();
 
         if after != before && after.is_some() {
-            if let (Some(old), Some(active)) = (before, self.active) {
-                self.last_active.insert(old, active);
+            if let Some(old) = before {
+                self.tabs.remember(old);
             }
 
+            let scope = Scope {
+                current: after,
+                sessions: &self.session_list,
+            };
+
             // Already visible if it belongs to this vault or is global (e.g. settings opened from the list).
-            if self.active_tab().is_none() {
-                self.active = None;
+            if self.tabs.active_tab(scope).is_none() {
+                self.tabs.active = None;
 
                 if let Some(id) = after
-                    .and_then(|v| self.last_active.get(&v).copied())
-                    .filter(|id| self.visible().any(|t| t.id == *id))
+                    .and_then(|v| self.tabs.last_in(v))
+                    .filter(|id| self.tabs.visible(scope).any(|t| t.id == *id))
                 {
-                    self.activate(id);
+                    self.tabs.activate(id);
                 }
             }
         }
@@ -433,91 +320,41 @@ impl AppState {
     }
 
     pub fn show_tab(&mut self, id: Uuid, cx: &mut Context<Self>) {
-        self.activate(id);
+        self.tabs.activate(id);
         cx.notify();
     }
 
-    /// The tab becomes the active one and the one its pane shows.
-    fn activate(&mut self, id: Uuid) {
-        self.active = Some(id);
-
-        if let Some(pane) = self.pane_of(id) {
-            self.pane_active.insert(pane, id);
+    /// What the tab logic needs from the rest of the app. It borrows all of `self`: where `self.tabs` is
+    /// borrowed mutably, build the `Scope` from its fields instead.
+    fn scope(&self) -> Scope<'_> {
+        Scope {
+            current: self.current(),
+            sessions: &self.session_list,
         }
     }
 
     // ---- Panes ----
 
     pub fn pane_of(&self, id: Uuid) -> Option<Uuid> {
-        self.tabs.iter().find(|t| t.id == id).map(|t| t.pane)
+        self.tabs.pane_of(id)
     }
 
     /// The visible tabs of a pane.
     pub fn pane_tabs(&self, pane: Uuid) -> impl Iterator<Item = &OpenTab> {
-        self.visible().filter(move |t| t.pane == pane)
+        self.tabs.pane_tabs(pane, self.scope())
     }
 
     /// The tab a pane shows: the active one if it is its own, the last one it showed, or the first.
     pub fn shown(&self, pane: Uuid) -> Option<Uuid> {
-        let has = |id: &Uuid| self.pane_tabs(pane).any(|t| t.id == *id);
-
-        self.active
-            .filter(has)
-            .or_else(|| self.pane_active.get(&pane).copied().filter(has))
-            .or_else(|| self.pane_tabs(pane).next().map(|t| t.id))
-    }
-
-    /// Where a new tab goes: the focused pane, or the first visible one.
-    fn target_pane(&self) -> Uuid {
-        let mut leaves = Vec::new();
-        self.panes.leaves(&mut leaves);
-
-        self.active
-            .filter(|_| self.active_tab().is_some())
-            .and_then(|id| self.pane_of(id))
-            .or_else(|| {
-                leaves
-                    .iter()
-                    .copied()
-                    .find(|p| self.pane_tabs(*p).next().is_some())
-            })
-            .unwrap_or(leaves[0])
+        self.tabs.shown(pane, self.scope())
     }
 
     /// Drops the tab `id` on the pane `pane`: in the center it moves into it; on an edge, into a new
     /// pane on that side. The view and the session stay the same.
     pub fn drop_tab(&mut self, id: Uuid, pane: Uuid, edge: Edge, cx: &mut Context<Self>) {
-        self.drop_target = None;
-
-        let Some(at) = self.tabs.iter().position(|t| t.id == id) else {
-            return;
-        };
-
-        match edge {
-            // At the end of the list, which is the end of its pane: dropping it in the empty slot
-            // leaves it last as well if it was already there.
-            None => {
-                let mut tab = self.tabs.remove(at);
-                tab.pane = pane;
-                self.tabs.push(tab);
-            }
-            Some((down, before)) => {
-                // Alone in its pane: splitting it would leave it empty and nothing would change.
-                if self.tabs[at].pane == pane
-                    && self.tabs.iter().filter(|t| t.pane == pane).count() == 1
-                {
-                    return;
-                }
-
-                let new = Uuid::new_v4();
-                self.panes = self.panes.clone().insert(pane, new, down, before);
-                self.tabs[at].pane = new;
-            }
+        if self.tabs.drop_tab(id, pane, edge) {
+            cx.notify();
         }
-
-        self.prune();
-        self.activate(id);
-        cx.notify();
     }
 
     /// Each pane calls this on every drag move: `target` if the mouse is over it. Otherwise,
@@ -528,49 +365,16 @@ impl AppState {
         target: Option<(Uuid, Edge)>,
         cx: &mut Context<Self>,
     ) {
-        let next = match target {
-            Some(t) => Some(t),
-            None if self.drop_target.is_some_and(|(p, _)| p == pane) => None,
-            None => self.drop_target,
-        };
-
-        if next != self.drop_target {
-            self.drop_target = next;
+        if self.tabs.set_drop_target(pane, target) {
             cx.notify();
         }
-    }
-
-    /// Removes panes without tabs. One always remains.
-    fn prune(&mut self) {
-        let mut leaves = Vec::new();
-        self.panes.leaves(&mut leaves);
-
-        let empty: Vec<Uuid> = leaves
-            .into_iter()
-            .filter(|p| !self.tabs.iter().any(|t| t.pane == *p))
-            .collect();
-
-        self.panes = empty
-            .iter()
-            .try_fold(self.panes.clone(), |p, id| p.without(*id))
-            .unwrap_or_else(|| Pane::Leaf(Uuid::new_v4()));
-        self.pane_active
-            .retain(|_, id| self.tabs.iter().any(|t| t.id == *id));
     }
 
     // ---- Tabs ----
 
     /// The vault of a tab. `None` for global tabs (the app settings).
     pub fn tab_vault(&self, tab: &Tab) -> Option<Uuid> {
-        match *tab {
-            Tab::Session(id) => self.session(id).map(|i| i.vault),
-            Tab::Host { vault, .. }
-            | Tab::Key { vault, .. }
-            | Tab::Tunnel { vault, .. }
-            | Tab::VaultSettings(vault)
-            | Tab::KnownHosts(vault) => Some(vault),
-            Tab::Settings | Tab::Licenses => None,
-        }
+        self.scope().vault_of(tab)
     }
 
     pub fn session(&self, id: Uuid) -> Option<&TabInfo> {
@@ -579,64 +383,39 @@ impl AppState {
 
     /// The tabs that are shown: those of the current vault and the global ones.
     pub fn visible(&self) -> impl Iterator<Item = &OpenTab> {
-        let current = self.current();
-
-        self.tabs.iter().filter(move |t| {
-            let vault = self.tab_vault(&t.tab);
-            vault.is_none() || vault == current
-        })
+        self.tabs.visible(self.scope())
     }
 
     /// What the active tab shows, if it is visible.
     pub fn active_tab(&self) -> Option<Tab> {
-        let active = self.active?;
-        self.visible().find(|t| t.id == active).map(|t| t.tab)
+        self.tabs.active_tab(self.scope())
     }
 
     /// Opens an entry in the preview tab. If it is already open, it is activated.
     pub fn preview(&mut self, tab: Tab, cx: &mut Context<Self>) {
-        if let Some(id) = self.tabs.iter().find(|t| t.tab == tab).map(|t| t.id) {
-            self.activate(id);
-            cx.notify();
-            return;
-        }
-
-        // As in Zed, each pane has its own preview.
-        let pane = self.target_pane();
-        let new = OpenTab {
-            id: Uuid::new_v4(),
-            tab,
-            preview: true,
-            pane,
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
         };
-        let old = self
-            .pane_tabs(pane)
-            .find(|t| t.preview)
-            .map(|t| t.id)
-            .and_then(|id| self.tabs.iter().position(|t| t.id == id));
 
-        match old {
-            Some(at) => self.tabs[at] = new,
-            None => self.insert_tab(new),
-        }
-
-        self.activate(new.id);
+        self.tabs.preview(tab, scope);
         cx.notify();
     }
 
     /// Opens an entry and pins it: when saving a form or editing it.
     pub fn open_pinned(&mut self, tab: Tab, cx: &mut Context<Self>) {
-        self.preview(tab, cx);
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
+        };
 
-        if let Some(open) = self.tabs.iter_mut().find(|t| t.tab == tab) {
-            open.preview = false;
-        }
+        self.tabs.open_pinned(tab, scope);
+        cx.notify();
     }
 
     /// A tab stops being a preview.
     pub fn pin(&mut self, id: Uuid, cx: &mut Context<Self>) {
-        if let Some(open) = self.tabs.iter_mut().find(|t| t.id == id) {
-            open.preview = false;
+        if self.tabs.pin(id) {
             cx.notify();
         }
     }
@@ -644,122 +423,47 @@ impl AppState {
     /// Sets the name of a tab. Renaming it pins it: the preview would replace it with the
     /// next entry, and the name would be lost.
     pub fn rename_tab(&mut self, id: Uuid, name: String, cx: &mut Context<Self>) {
-        self.renames.insert(id, name);
-        self.pin(id, cx);
+        self.tabs.rename(id, name);
         cx.notify();
     }
 
     /// App or vault settings: only one tab of each, always pinned.
     pub fn open_single(&mut self, tab: Tab, cx: &mut Context<Self>) {
-        if let Some(id) = self.tabs.iter().find(|t| t.tab == tab).map(|t| t.id) {
-            self.activate(id);
-        } else {
-            let new = OpenTab {
-                id: Uuid::new_v4(),
-                tab,
-                preview: false,
-                pane: Uuid::nil(),
-            };
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
+        };
 
-            self.insert_tab(new);
-            self.activate(new.id);
-        }
-
+        self.tabs.open_single(tab, scope);
         cx.notify();
-    }
-
-    /// In the focused pane, to the right of the active tab, or at the end.
-    fn insert_tab(&mut self, mut tab: OpenTab) {
-        tab.pane = self.target_pane();
-
-        let at = self
-            .active
-            .and_then(|id| self.tabs.iter().position(|t| t.id == id))
-            .map_or(self.tabs.len(), |i| i + 1);
-
-        self.tabs.insert(at, tab);
-    }
-
-    /// Removes tabs (without closing sessions). If the active one goes, the tab to its right in its pane is shown or,
-    /// if there is none, the one to its left, as in browsers. If its pane is left empty, the focus
-    /// moves to whatever another pane shows.
-    fn remove_tabs(&mut self, ids: &[Uuid]) {
-        if ids.is_empty() {
-            return;
-        }
-
-        let mut next = None;
-
-        if let Some(active) = self.active.filter(|a| ids.contains(a)) {
-            let pane = self.pane_of(active);
-            let left: Vec<Uuid> = self
-                .visible()
-                .filter(|t| Some(t.pane) == pane)
-                .map(|t| t.id)
-                .collect();
-            let at = left.iter().position(|id| *id == active);
-
-            next = at
-                .and_then(|at| {
-                    let right = left[at + 1..].iter().find(|id| !ids.contains(id));
-                    let before = left[..at].iter().rev().find(|id| !ids.contains(id));
-                    right.or(before).copied()
-                })
-                .or_else(|| {
-                    self.visible()
-                        .filter(|t| !ids.contains(&t.id))
-                        .find(|t| self.pane_active.get(&t.pane) == Some(&t.id))
-                        .or_else(|| self.visible().find(|t| !ids.contains(&t.id)))
-                        .map(|t| t.id)
-                });
-            self.active = None;
-        }
-
-        self.tabs.retain(|t| !ids.contains(&t.id));
-        self.last_active.retain(|_, id| !ids.contains(id));
-        self.renames.retain(|id, _| !ids.contains(id));
-        self.prune();
-
-        if let Some(id) = next {
-            self.activate(id);
-        }
     }
 
     /// Closes the detail tabs of a host, a key or a tunnel (when it is deleted).
     pub fn close_item(&mut self, item: Uuid, cx: &mut Context<Self>) {
         let ids: Vec<Uuid> = self
             .tabs
+            .list
             .iter()
             .filter(|t| {
                 matches!(t.tab, Tab::Host { id, .. } | Tab::Key { id, .. } | Tab::Tunnel { id, .. } if id == item)
             })
             .map(|t| t.id)
             .collect();
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
+        };
 
-        self.remove_tabs(&ids);
+        self.tabs.remove(&ids, scope);
         cx.notify();
     }
 
     /// Drops the tab `id` on `target`: it takes its place (and its pane), pushing it toward
     /// where it came from.
     pub fn move_tab(&mut self, id: Uuid, target: Uuid, cx: &mut Context<Self>) {
-        let (Some(from), Some(to)) = (
-            self.tabs.iter().position(|t| t.id == id),
-            self.tabs.iter().position(|t| t.id == target),
-        ) else {
-            return;
-        };
-
-        if from == to {
-            return;
+        if self.tabs.move_tab(id, target) {
+            cx.notify();
         }
-
-        let mut tab = self.tabs.remove(from);
-        tab.pane = self.tabs[if from < to { to - 1 } else { to }].pane;
-        self.tabs.insert(to, tab);
-        self.prune();
-        self.activate(id);
-        cx.notify();
     }
 
     // ---- Vaults ----
@@ -1013,15 +717,22 @@ impl AppState {
     fn close_vault_tabs(&mut self, vault: Uuid) {
         let ids: Vec<Uuid> = self
             .tabs
+            .list
             .iter()
             .filter(|t| self.tab_vault(&t.tab) == Some(vault))
             .map(|t| t.id)
             .collect();
 
         self.sessions.close_vault(vault);
-        self.remove_tabs(&ids);
+
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
+        };
+
+        self.tabs.remove(&ids, scope);
         self.session_list = self.sessions.list();
-        self.last_active.remove(&vault);
+        self.tabs.forget(vault);
         self.picking = None;
     }
 
@@ -1131,25 +842,34 @@ impl AppState {
         self.session_list = self.sessions.list();
 
         // The host entry in preview (the one opened by the first click of a double click) gives
-        // its place to the connection. `insert_tab` puts it to its right; when the entry is removed, the connection stays in its place.
+        // its place to the connection. `Tabs::insert` puts it to its right; when the entry is removed, the connection stays in its place.
         let preview = self
             .tabs
+            .list
             .iter()
             .find(|t| t.preview && t.tab == Tab::Host { vault, id: host })
             .map(|t| t.id);
 
-        self.insert_tab(OpenTab {
-            id,
-            tab: Tab::Session(id),
-            preview: false,
-            pane: Uuid::nil(),
-        });
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
+        };
+
+        self.tabs.insert(
+            OpenTab {
+                id,
+                tab: Tab::Session(id),
+                preview: false,
+                pane: Uuid::nil(),
+            },
+            scope,
+        );
 
         if let Some(old) = preview {
-            self.remove_tabs(&[old]);
+            self.tabs.remove(&[old], scope);
         }
 
-        self.activate(id);
+        self.tabs.activate(id);
         cx.notify();
     }
 
@@ -1160,7 +880,12 @@ impl AppState {
             self.session_list.retain(|i| i.id != id);
         }
 
-        self.remove_tabs(&[id]);
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
+        };
+
+        self.tabs.remove(&[id], scope);
         cx.notify();
     }
 
@@ -1175,7 +900,12 @@ impl AppState {
 
         self.sessions.close_host(host);
         self.session_list.retain(|i| i.host != host);
-        self.remove_tabs(&ids);
+        let scope = Scope {
+            current: self.current(),
+            sessions: &self.session_list,
+        };
+
+        self.tabs.remove(&ids, scope);
         self.close_item(host, cx);
     }
 
@@ -1236,30 +966,4 @@ pub fn pick(
             }
         })
         .detach();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Pane;
-    use uuid::Uuid;
-
-    #[test]
-    fn split_and_remove_leaves_sibling_in_place() {
-        let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
-
-        // a | (c above b)
-        let pane = Pane::Leaf(a)
-            .insert(a, b, false, false)
-            .insert(b, c, true, true);
-        let mut leaves = Vec::new();
-        pane.leaves(&mut leaves);
-        assert_eq!(leaves, [a, c, b]);
-
-        // Without `b`, `c` moves up to the place of the b/c group.
-        let rest = pane.without(b).unwrap();
-        assert_eq!(rest.clone().without(c), Some(Pane::Leaf(a)));
-        assert!(matches!(rest, Pane::Split { down: false, .. }));
-
-        assert_eq!(Pane::Leaf(a).without(a), None);
-    }
 }

@@ -3,7 +3,8 @@
 
 //! Form to generate a new key for the keychain.
 
-use crate::app::state::{AppState, Tab};
+use crate::app::state::AppState;
+use crate::app::tabs::Tab;
 use crate::app::theme::colors;
 use crate::app::theme::px;
 use crate::components::WindowExt;

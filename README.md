@@ -52,7 +52,7 @@ The logic lives in independent crates (`core`, `vaults`, `sessions`, `ssh`, `sft
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md). AI tools are allowed if a human has reviewed the generated code and understands it. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License
 

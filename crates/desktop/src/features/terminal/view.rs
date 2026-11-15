@@ -653,7 +653,7 @@ impl Render for TerminalView {
             self.measure(&settings, window);
         }
 
-        let active = self.state.read(cx).active == Some(self.tab);
+        let active = self.state.read(cx).tabs.active == Some(self.tab);
 
         if active && !self.was_active {
             window.focus(&self.focus, cx);

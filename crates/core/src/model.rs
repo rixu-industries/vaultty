@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 José García "Ruxwez" (Rixu Industries)
 
-use std::collections::HashMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -32,15 +31,6 @@ pub struct Host {
     #[serde(default)]
     #[zeroize(skip)]
     pub mcp: Option<McpPerms>,
-}
-
-impl Host {
-    /// Whether any access method of the host uses the key `key_id`.
-    pub fn uses_key(&self, key_id: Uuid) -> bool {
-        self.access_methods
-            .iter()
-            .any(|m| matches!(m.kind, AccessKind::Key { key_id: k, .. } if k == key_id))
-    }
 }
 
 /// What the MCP server can do with a vault or a host.
@@ -178,41 +168,9 @@ pub enum Record {
     Tombstone,
 }
 
-/// Returns true if setting `new_parent` as the parent of `group` would create a cycle.
-pub fn would_cycle(groups: &HashMap<Uuid, Group>, group: Uuid, new_parent: Option<Uuid>) -> bool {
-    let mut cur = new_parent;
-
-    // Bounded walk so that an already corrupt tree cannot loop forever.
-    for _ in 0..=groups.len() {
-        match cur {
-            None => return false,
-            Some(id) if id == group => return true,
-            Some(id) => cur = groups.get(&id).and_then(|g| g.parent_id),
-        }
-    }
-
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Checks that would_cycle detects cycles and does not flag false positives.
-    #[test]
-    fn detects_cycles() {
-        let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
-        let g = |p| Group {
-            name: String::new(),
-            parent_id: p,
-        };
-        let groups = HashMap::from([(a, g(None)), (b, g(Some(a))), (c, g(Some(b)))]);
-
-        assert!(would_cycle(&groups, a, Some(c)));
-        assert!(would_cycle(&groups, a, Some(a)));
-        assert!(!would_cycle(&groups, c, Some(a)));
-        assert!(!would_cycle(&groups, b, None));
-    }
 
     // Checks that Debug does not show passwords or private keys.
     #[test]

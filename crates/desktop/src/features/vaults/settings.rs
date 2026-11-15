@@ -175,6 +175,10 @@ impl Render for VaultSettings {
             .child(muted(
                 "Change the password used to unlock this vault. Open connections are kept.",
             ))
+            .child(div().mt(px(8.)).child(note(
+                "The vault's encryption key stays the same: an older copy of the vault folder (a backup, the sync history) still opens with the old password. If that password leaked, create a new vault and move your hosts to it.",
+                c.muted_foreground,
+            )))
             .child(
                 div().flex().flex_col()
                     .mt(px(16.))

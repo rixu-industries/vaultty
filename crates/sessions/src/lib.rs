@@ -589,7 +589,13 @@ mod tests {
         let events = Arc::new(Mutex::new(Vec::new()));
         let seen = events.clone();
         let notify: Notify = Arc::new(move |e| seen.lock().unwrap().push(e));
-        let sessions = Sessions::new(Arc::new(Vaults::load()), runtime.handle().clone(), notify);
+        let sessions = Sessions::new(
+            Arc::new(Vaults::at(
+                std::env::temp_dir().join("vaultty-test-none.json"),
+            )),
+            runtime.handle().clone(),
+            notify,
+        );
 
         let id = sessions.open(
             Uuid::new_v4(),

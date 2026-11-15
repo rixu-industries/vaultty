@@ -3,7 +3,8 @@
 
 //! A key's detail page: its fingerprint, public key and the hosts that use it.
 
-use crate::app::state::{AppState, Tab};
+use crate::app::state::AppState;
+use crate::app::tabs::Tab;
 use crate::app::theme::px;
 use crate::app::theme::{colors, mono_font};
 use crate::components::{Button, ButtonVariant, os_icon, property, section_title};

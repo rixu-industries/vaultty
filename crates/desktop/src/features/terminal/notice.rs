@@ -68,7 +68,6 @@ pub fn notice(state: &Entity<AppState>, tab: &TabInfo, cx: &App) -> AnyElement {
                             div()
                                 .font_family(mono_font())
                                 .text_color(c.muted_foreground)
-                                .truncate()
                                 .child(fingerprint.clone()),
                         ),
                 )

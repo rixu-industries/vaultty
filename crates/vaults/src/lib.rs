@@ -16,7 +16,7 @@ mod registry;
 mod remembered;
 mod session;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -34,6 +34,10 @@ const LOCKED: &str = "The vault is locked.";
 pub struct Vaults {
     known: Mutex<Vec<KnownVault>>,
     open: Mutex<HashMap<Uuid, OpenVault>>,
+    /// Vaults whose folder was gone the last time `check_missing` looked.
+    missing: Mutex<HashSet<Uuid>>,
+    /// Where the list is saved. `None`: the system has no configuration folder.
+    file: Option<PathBuf>,
 }
 
 // ---- Views (no secrets) ----
@@ -239,10 +243,35 @@ fn key_view(id: Uuid, key: &Key) -> KeyView {
 impl Vaults {
     /// Reads the vault list from disk. All of them start locked.
     pub fn load() -> Self {
+        Self::new(registry::file())
+    }
+
+    /// Like `load`, with the list in another file: tests must not touch the real one.
+    pub fn at(file: PathBuf) -> Self {
+        Self::new(Some(file))
+    }
+
+    fn new(file: Option<PathBuf>) -> Self {
         Self {
-            known: Mutex::new(registry::load()),
+            known: Mutex::new(registry::load(file.as_deref())),
             open: Mutex::new(HashMap::new()),
+            missing: Mutex::default(),
+            file,
         }
+    }
+
+    /// Looks on disk for the vaults whose folder is gone, for `list`. It can take long (a network
+    /// drive that does not answer): call it off the UI thread. Holds no lock while looking.
+    pub fn check_missing(&self) {
+        let known = self.known.lock().unwrap().clone();
+
+        let missing = known
+            .iter()
+            .filter(|v| v.is_missing())
+            .map(|v| v.id)
+            .collect();
+
+        *self.missing.lock().unwrap() = missing;
     }
 
     /// Reads from an open vault. The caller must return its own data, not references.
@@ -273,12 +302,17 @@ impl Vaults {
         id: Uuid,
         edit: impl FnOnce(&mut Host),
     ) -> Result<(), String> {
-        let mut host = self
-            .with_open(vault, |v| v.hosts.get(&id).cloned())?
-            .ok_or("The host no longer exists.")?;
+        // Read and saved under the same lock: a change made in between by another thread would be lost.
+        self.change(vault, |open| {
+            let mut host = open
+                .hosts
+                .get(&id)
+                .cloned()
+                .ok_or("The host no longer exists.")?;
 
-        edit(&mut host);
-        self.change(vault, |open| open.save(id, Record::Host(host)))
+            edit(&mut host);
+            open.save(id, Record::Host(host))
+        })
     }
 
     /// Copy of the host and of the key the method uses, with their secrets. Only to open the SSH
@@ -305,7 +339,7 @@ impl Vaults {
             known.push(vault);
         }
 
-        registry::save(&known)
+        registry::save(self.file.as_deref(), &known)
     }
 
     /// The vault's folder and whether it has a remembered password.
@@ -332,13 +366,15 @@ impl Vaults {
             v.remember_password = password.is_some();
         }
 
-        registry::save(&known)
+        registry::save(self.file.as_deref(), &known)
     }
 
     // ---- Vaults ----
 
+    /// Does not touch the disk: `missing` is what `check_missing` last found.
     pub fn list(&self) -> Vec<VaultItem> {
         let open = self.open.lock().unwrap();
+        let missing = self.missing.lock().unwrap();
 
         self.known
             .lock()
@@ -350,7 +386,7 @@ impl Vaults {
                 path: v.path.display().to_string(),
                 unlocked: open.contains_key(&v.id),
                 remember_password: v.remember_password,
-                missing: v.is_missing(),
+                missing: missing.contains(&v.id),
             })
             .collect()
     }
@@ -364,6 +400,8 @@ impl Vaults {
         }
 
         self.open.lock().unwrap().remove(&vault);
+        // Its header has just been read from the new folder.
+        self.missing.lock().unwrap().remove(&vault);
 
         let mut known = self.known.lock().unwrap();
         let entry = known
@@ -373,7 +411,7 @@ impl Vaults {
         entry.name = registry::name_of(&dir);
         entry.path = dir;
 
-        registry::save(&known)
+        registry::save(self.file.as_deref(), &known)
     }
 
     /// Creates an empty vault in `dir`, adds it to the list and leaves it unlocked. Takes time (Argon2).
@@ -418,7 +456,7 @@ impl Vaults {
         let mut known = self.known.lock().unwrap();
         known.retain(|v| v.id != vault);
 
-        registry::save(&known)
+        registry::save(self.file.as_deref(), &known)
     }
 
     /// Decrypts the vault at `path`. Holds no lock while running: Argon2 is slow.
@@ -566,34 +604,30 @@ impl Vaults {
             return Err("The name, address or port is missing.".into());
         }
 
-        let existing = match id {
-            Some(id) => self.with_open(vault, |v| v.hosts.get(&id).cloned())?,
-            None => None,
-        };
-
-        let same = existing
-            .as_ref()
-            .filter(|h| h.address == address && h.port == host.port);
-
-        let new_host = Host {
-            // When editing, the access methods it already had are kept.
-            access_methods: existing
-                .as_ref()
-                .map(|h| h.access_methods.clone())
-                .unwrap_or_default(),
-            notes: host.notes.trim().to_string(),
-            // The fingerprint and OS are kept if it is still the same server; if the address changes, they are looked up again.
-            host_key: same.and_then(|h| h.host_key.clone()),
-            os: same.and_then(|h| h.os.clone()),
-            mcp: existing.as_ref().and_then(|h| h.mcp),
-            name,
-            address,
-            port: host.port,
-            group_id: host.group_id,
-        };
-
         let host_id = id.unwrap_or_else(Uuid::new_v4);
-        self.change(vault, |open| open.save(host_id, Record::Host(new_host)))?;
+
+        self.change(vault, |open| {
+            let existing = id.and_then(|id| open.hosts.get(&id));
+            let same = existing.filter(|h| h.address == address && h.port == host.port);
+
+            let new_host = Host {
+                // When editing, the access methods it already had are kept.
+                access_methods: existing
+                    .map(|h| h.access_methods.clone())
+                    .unwrap_or_default(),
+                notes: host.notes.trim().to_string(),
+                // The fingerprint and OS are kept if it is still the same server; if the address changes, they are looked up again.
+                host_key: same.and_then(|h| h.host_key.clone()),
+                os: same.and_then(|h| h.os.clone()),
+                mcp: existing.and_then(|h| h.mcp),
+                name,
+                address,
+                port: host.port,
+                group_id: host.group_id,
+            };
+
+            open.save(host_id, Record::Host(new_host))
+        })?;
 
         Ok(host_id)
     }
@@ -604,18 +638,18 @@ impl Vaults {
             return Err("The name is missing.".into());
         }
 
-        let parent_id = match id {
-            Some(id) => self.with_open(vault, |v| v.groups.get(&id).and_then(|g| g.parent_id))?,
-            None => None,
-        };
-
-        let group = Group {
-            name: name.trim().to_string(),
-            parent_id,
-        };
-
         let group_id = id.unwrap_or_else(Uuid::new_v4);
-        self.change(vault, |open| open.save(group_id, Record::Group(group)))?;
+
+        self.change(vault, |open| {
+            let group = Group {
+                name: name.trim().to_string(),
+                parent_id: id
+                    .and_then(|id| open.groups.get(&id))
+                    .and_then(|g| g.parent_id),
+            };
+
+            open.save(group_id, Record::Group(group))
+        })?;
 
         Ok(group_id)
     }
@@ -706,7 +740,9 @@ impl Vaults {
             kind => kind,
         };
 
-        let (enabled, taken, target) = self.with_open(vault, |v| {
+        let tunnel_id = id.unwrap_or_else(Uuid::new_v4);
+
+        self.change(vault, |v| {
             let enabled = id
                 .and_then(|id| v.tunnels.get(&id))
                 .is_none_or(|t| t.enabled);
@@ -725,41 +761,42 @@ impl Vaults {
                 .get(&tunnel.host_id)
                 .is_some_and(|h| h.access_methods.iter().any(|m| m.id == tunnel.method_id));
 
-            (enabled, taken, target)
+            if taken {
+                return Err(format!("Another tunnel already uses port {}.", tunnel.port));
+            }
+
+            if !target {
+                return Err("The host or access method no longer exists.".into());
+            }
+
+            let record = Tunnel {
+                name,
+                kind,
+                bind,
+                port: tunnel.port,
+                host_id: tunnel.host_id,
+                method_id: tunnel.method_id,
+                enabled,
+            };
+
+            v.save(tunnel_id, Record::Tunnel(record))
         })?;
-
-        if taken {
-            return Err(format!("Another tunnel already uses port {}.", tunnel.port));
-        }
-
-        if !target {
-            return Err("The host or access method no longer exists.".into());
-        }
-
-        let record = Tunnel {
-            name,
-            kind,
-            bind,
-            port: tunnel.port,
-            host_id: tunnel.host_id,
-            method_id: tunnel.method_id,
-            enabled,
-        };
-
-        let tunnel_id = id.unwrap_or_else(Uuid::new_v4);
-        self.change(vault, |open| open.save(tunnel_id, Record::Tunnel(record)))?;
 
         Ok(tunnel_id)
     }
 
     /// Enables or disables a tunnel. Starting or stopping it is up to the caller (`sessions`).
     pub fn set_tunnel_enabled(&self, vault: Uuid, id: Uuid, enabled: bool) -> Result<(), String> {
-        let mut tunnel = self
-            .with_open(vault, |v| v.tunnels.get(&id).cloned())?
-            .ok_or("The tunnel no longer exists.")?;
+        self.change(vault, |open| {
+            let mut tunnel = open
+                .tunnels
+                .get(&id)
+                .cloned()
+                .ok_or("The tunnel no longer exists.")?;
 
-        tunnel.enabled = enabled;
-        self.change(vault, |open| open.save(id, Record::Tunnel(tunnel)))
+            tunnel.enabled = enabled;
+            open.save(id, Record::Tunnel(tunnel))
+        })
     }
 
     // ---- Keychain ----
@@ -849,6 +886,24 @@ pub fn read_key_file(path: &Path) -> Result<KeyFile, String> {
 mod tests {
     use super::*;
 
+    // Checks that a vault is reported missing only after `check_missing` has looked at the disk.
+    #[test]
+    fn missing_folder_is_found_by_check_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("Vault");
+        let vaults = Vaults::at(tmp.path().join("vaults.json"));
+        vaults.create(dir.clone(), "pw").unwrap();
+
+        vaults.check_missing();
+        assert!(!vaults.list()[0].missing);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!vaults.list()[0].missing);
+
+        vaults.check_missing();
+        assert!(vaults.list()[0].missing);
+    }
+
     // `Vaults` is built by hand: `create` would write `vaults.json` to the real config folder.
     #[test]
     fn host_key_is_saved_and_forgotten() {
@@ -873,6 +928,8 @@ mod tests {
         let vaults = Vaults {
             known: Mutex::new(vec![]),
             open: Mutex::new(HashMap::from([(vault, open)])),
+            missing: Mutex::default(),
+            file: None,
         };
         let key = |v: &Vaults| {
             v.with_open(vault, |o| o.hosts[&id].host_key.clone())

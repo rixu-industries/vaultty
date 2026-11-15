@@ -693,6 +693,12 @@ impl Render for McpSettings {
                             ),
                         ),
                     )
+                    .when(!host.is_empty() && !mcp::is_loopback(&host), |this| {
+                        this.child(note(
+                            "It listens beyond this computer, and the token travels unencrypted: anyone on the network who captures it can use the server.",
+                            c.warning,
+                        ))
+                    })
                     .child(field("Port", Input::new(&self.port).disabled(running)))
                     .when(running, |this| {
                         this.child(note(

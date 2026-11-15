@@ -13,7 +13,7 @@ mod server;
 mod settings;
 mod tools;
 
-pub use server::{Server, start};
+pub use server::{Server, is_loopback, start};
 pub use settings::{Settings, VaultAccess, load, new_token, save, token};
 pub use tools::{Ask, ExecRequest};
 pub use vaults::{Exec, McpPerms};

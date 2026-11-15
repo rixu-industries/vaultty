@@ -6,7 +6,7 @@
 use crate::app::prefs::Prefs;
 use crate::app::theme::colors;
 use crate::app::theme::px;
-use crate::components::{choice, note};
+use crate::components::{Switch, choice, note};
 use crate::features::settings::{header, setting};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{Context, IntoElement, ParentElement, Render, Styled, Window, div};
@@ -42,7 +42,7 @@ impl Render for TerminalSettings {
         }
 
         let settings = Prefs::get(cx).terminal.clone();
-        let (on_family, on_size) = (cx.entity(), cx.entity());
+        let (on_family, on_size, on_clipboard) = (cx.entity(), cx.entity(), cx.entity());
 
         // `None` is "the built-in one": so if Cascadia Mono is installed later, it is picked up automatically.
         let families = std::iter::once((None, "Default".to_string()))
@@ -83,6 +83,15 @@ impl Render for TerminalSettings {
                         on_size.update(cx, |t, cx| t.update(cx, |s| s.font_size = size));
                     },
                 )),
+            ))
+            .child(setting(
+                "Clipboard access",
+                "Let programs on the server (tmux, vim…) copy text to this computer's clipboard. A server you do not trust could use it to plant a command for you to paste.",
+                Switch::new("terminal-remote-clipboard", "Clipboard access")
+                    .checked(settings.remote_clipboard)
+                    .on_click(move |on, _, cx| {
+                        on_clipboard.update(cx, |t, cx| t.update(cx, |s| s.remote_clipboard = *on));
+                    }),
             ))
     }
 }

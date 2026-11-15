@@ -88,6 +88,7 @@ fn main() {
             gpui_kit::KeyBinding::new("ctrl-c", gpui_kit::NoAction, Some("Terminal")),
         ]);
 
+        let watched = vaults.clone();
         let state = cx.new(|_| AppState::new(vaults, sessions));
 
         // Session notices arrive from the tokio threads and are applied here, on the UI thread.
@@ -101,14 +102,20 @@ fn main() {
         })
         .detach();
 
-        // Watches that the vaults are still in their folder.
+        // Watches that the vaults are still in their folder. Looking at the disk happens off the UI
+        // thread: a network drive that stops answering would freeze the window.
         cx.spawn({
             let state = state.clone();
             async move |cx| {
                 loop {
-                    cx.background_executor().timer(CHECK_EVERY).await;
+                    let vaults = watched.clone();
+                    cx.background_executor()
+                        .spawn(async move { vaults.check_missing() })
+                        .await;
 
                     state.update(cx, |s, cx| s.check_vaults(cx));
+
+                    cx.background_executor().timer(CHECK_EVERY).await;
                 }
             }
         })

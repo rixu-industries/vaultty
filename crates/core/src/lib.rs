@@ -8,7 +8,6 @@ mod vault;
 
 pub use model::{
     AccessKind, AccessMethod, Exec, Group, Host, Key, McpPerms, Record, Tunnel, TunnelKind,
-    would_cycle,
 };
 pub use vault::{
     EncryptedRecord, FORMAT_VERSION, KdfParams, UnlockedVault, Vault, VaultHeader, WrappedKey,

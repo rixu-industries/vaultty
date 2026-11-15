@@ -11,6 +11,9 @@ pub struct Settings {
     /// `None`: the app's choice (Cascadia Mono if available; otherwise the system monospace font).
     pub font_family: Option<String>,
     pub font_size: f32,
+    /// Programs on the server may copy text to this computer's clipboard (OSC 52). Off by default:
+    /// a server could plant a command there for the user to paste somewhere else.
+    pub remote_clipboard: bool,
 }
 
 impl Default for Settings {
@@ -18,6 +21,7 @@ impl Default for Settings {
         Self {
             font_family: None,
             font_size: 13.,
+            remote_clipboard: false,
         }
     }
 }

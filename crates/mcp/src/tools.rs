@@ -19,6 +19,7 @@ use rmcp::schemars::{self, JsonSchema};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use sessions::Sessions;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use vaults::{Exec, HostInput, HostView, McpPerms, MethodView, VaultView};
 
@@ -475,6 +476,20 @@ fn method_of(host: &HostView, query: Option<&str>) -> Result<Uuid, String> {
     }
 }
 
+/// Saved credentials go wherever the host points: an agent that moved it would send them, on the
+/// user's next connection, to a server of its choosing.
+fn moves_credentials(host: &HostView, arg: &SaveHostArg) -> bool {
+    let address = arg
+        .address
+        .as_deref()
+        .is_some_and(|a| a.trim() != host.address);
+    let port = arg.port.is_some_and(|p| p != host.port);
+
+    !host.methods.is_empty() && (address || port)
+}
+
+const MOVES_CREDENTIALS: &str = "This host has saved credentials, so only the user can change its \
+    address or port, in the Vaultty app. Its other fields can be edited here.";
 const NO_READ: &str = "You do not have read permission here. The user can change it in Vaultty: \
     Settings > MCP server.";
 const NO_WRITE: &str = "You do not have write permission here. The user can change it in Vaultty: \
@@ -577,7 +592,7 @@ impl Tools {
     }
 
     #[tool(
-        description = "Create a host (without `host`) or edit one (with `host`). Access methods (credentials) cannot be set here: the user adds them in the app.",
+        description = "Create a host (without `host`) or edit one (with `host`). Access methods (credentials) cannot be set here: the user adds them in the app. Once a host has access methods, only the user can change its address or port.",
         annotations(read_only_hint = false, destructive_hint = false)
     )]
     fn save_host(&self, Parameters(arg): Parameters<SaveHostArg>) -> Result<Json<Saved>, String> {
@@ -595,6 +610,13 @@ impl Tools {
 
         if !perms.write {
             return Err(NO_WRITE.into());
+        }
+
+        if existing
+            .as_ref()
+            .is_some_and(|h| moves_credentials(h, &arg))
+        {
+            return Err(MOVES_CREDENTIALS.into());
         }
 
         let group_id = match arg.group.as_deref() {
@@ -711,6 +733,7 @@ impl Tools {
     async fn run_command(
         &self,
         Parameters(arg): Parameters<RunArg>,
+        cancelled: CancellationToken,
     ) -> Result<Json<RunOut>, String> {
         let (vault, host, perms) = self.find_host(arg.vault.as_deref(), &arg.host)?;
         let method = method_of(&host, arg.method.as_deref())?;
@@ -763,7 +786,7 @@ impl Tools {
             let running = job.clone();
             tokio::spawn(async move { running.run(&sessions).await });
         } else {
-            job.run(&self.sessions).await;
+            job.run_unless(&self.sessions, &cancelled).await;
         }
 
         Ok(Json(job_out(&job)))
@@ -900,6 +923,172 @@ mod tests {
         write: false,
         exec: Exec::No,
     };
+
+    const WRITE: McpPerms = McpPerms {
+        read: true,
+        write: true,
+        exec: Exec::No,
+    };
+
+    /// The tools over a real vault in a temporary folder, with a host `web` that has a password.
+    fn tools(perms: McpPerms) -> (tempfile::TempDir, Tools, Uuid, Uuid) {
+        let tmp = tempfile::tempdir().unwrap();
+        let vaults = vaults::Vaults::at(tmp.path().join("vaults.json"));
+        let vault = vaults.create(tmp.path().join("Vault"), "pw").unwrap();
+
+        let input = HostInput {
+            name: "web".into(),
+            address: "10.0.0.1".into(),
+            port: 22,
+            ..HostInput::default()
+        };
+        let host = vaults.save_host(vault, None, input).unwrap();
+
+        let method = vaults::AccessMethod {
+            id: Uuid::new_v4(),
+            label: String::new(),
+            kind: vaults::AccessKind::Password {
+                username: "deploy".into(),
+                password: "hunter2".into(),
+            },
+        };
+        vaults.save_method(vault, host, method).unwrap();
+
+        let sessions = Sessions::new(
+            Arc::new(vaults),
+            tokio::runtime::Handle::current(),
+            Arc::new(|_| {}),
+        );
+
+        let tools = Tools {
+            sessions,
+            access: Arc::new(Mutex::new(vec![VaultAccess { id: vault, perms }])),
+            ask: Arc::new(|_| Box::pin(async { false })),
+            jobs: Arc::new(Jobs::new(CancellationToken::new())),
+        };
+
+        (tmp, tools, vault, host)
+    }
+
+    fn edit(host: &str, address: Option<&str>, notes: Option<&str>) -> Parameters<SaveHostArg> {
+        Parameters(SaveHostArg {
+            host: Some(host.into()),
+            vault: None,
+            name: None,
+            address: address.map(Into::into),
+            port: None,
+            group: None,
+            notes: notes.map(Into::into),
+        })
+    }
+
+    fn host_arg(host: &str) -> Parameters<HostArg> {
+        Parameters(HostArg {
+            host: host.into(),
+            vault: None,
+        })
+    }
+
+    fn run(host: &str) -> Parameters<RunArg> {
+        Parameters(RunArg {
+            host: host.into(),
+            command: "id".into(),
+            vault: None,
+            method: None,
+            timeout_secs: None,
+            background: None,
+        })
+    }
+
+    // Checks that a read-only agent cannot change, delete or run anything.
+    #[tokio::test]
+    async fn read_only_cannot_write_or_run() {
+        let (_tmp, tools, vault, _) = tools(READ);
+
+        assert!(
+            tools
+                .list_hosts(Parameters(VaultFilter { vault: None }))
+                .is_ok()
+        );
+        assert_eq!(
+            tools.save_host(edit("web", None, Some("x"))).err().unwrap(),
+            NO_WRITE
+        );
+        assert_eq!(tools.delete_host(host_arg("web")).err().unwrap(), NO_WRITE);
+        assert!(
+            tools
+                .run_command(run("web"), CancellationToken::new())
+                .await
+                .is_err()
+        );
+
+        let view = tools.sessions.vaults().view(vault).unwrap();
+        assert_eq!(view.hosts.len(), 1);
+        assert_eq!(view.hosts[0].notes, "");
+    }
+
+    // Checks that a host whose own permissions deny everything cannot be found, whatever the vault allows.
+    #[tokio::test]
+    async fn host_without_permissions_is_invisible() {
+        let (_tmp, tools, vault, host) = tools(WRITE);
+
+        tools
+            .sessions
+            .vaults()
+            .edit_host(vault, host, |h| h.mcp = Some(NONE))
+            .unwrap();
+
+        assert!(tools.save_host(edit("web", None, Some("x"))).is_err());
+        assert!(tools.delete_host(host_arg("web")).is_err());
+        assert!(
+            tools
+                .run_command(run("web"), CancellationToken::new())
+                .await
+                .is_err()
+        );
+        assert_eq!(tools.sessions.vaults().view(vault).unwrap().hosts.len(), 1);
+    }
+
+    // Checks that an agent with write permission cannot point saved credentials at another server.
+    #[tokio::test]
+    async fn cannot_move_a_host_with_credentials() {
+        let (_tmp, tools, vault, host) = tools(WRITE);
+        let address = |tools: &Tools| {
+            let view = tools.sessions.vaults().view(vault).unwrap();
+            view.hosts
+                .iter()
+                .find(|h| h.id == host)
+                .unwrap()
+                .address
+                .clone()
+        };
+
+        assert_eq!(
+            tools
+                .save_host(edit("web", Some("evil.example"), None))
+                .err()
+                .unwrap(),
+            MOVES_CREDENTIALS
+        );
+        assert_eq!(address(&tools), "10.0.0.1");
+
+        // Its other fields, and sending the same address again, are still allowed.
+        assert!(
+            tools
+                .save_host(edit("web", Some("10.0.0.1"), Some("x")))
+                .is_ok()
+        );
+
+        // Without credentials there is nothing to send elsewhere.
+        let method = tools.sessions.vaults().view(vault).unwrap().hosts[0].methods[0].id;
+        tools
+            .sessions
+            .vaults()
+            .remove_method(vault, host, method)
+            .unwrap();
+        assert!(tools.save_host(edit("web", Some("10.0.0.2"), None)).is_ok());
+        assert_eq!(address(&tools), "10.0.0.2");
+    }
 
     #[test]
     fn the_host_overrides_the_vault() {
