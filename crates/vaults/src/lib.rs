@@ -16,7 +16,7 @@ mod registry;
 mod remembered;
 mod session;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -34,6 +34,8 @@ const LOCKED: &str = "The vault is locked.";
 pub struct Vaults {
     known: Mutex<Vec<KnownVault>>,
     open: Mutex<HashMap<Uuid, OpenVault>>,
+    /// Vaults whose folder was gone the last time `check_missing` looked.
+    missing: Mutex<HashSet<Uuid>>,
     /// Where the list is saved. `None`: the system has no configuration folder.
     file: Option<PathBuf>,
 }
@@ -253,8 +255,23 @@ impl Vaults {
         Self {
             known: Mutex::new(registry::load(file.as_deref())),
             open: Mutex::new(HashMap::new()),
+            missing: Mutex::default(),
             file,
         }
+    }
+
+    /// Looks on disk for the vaults whose folder is gone, for `list`. It can take long (a network
+    /// drive that does not answer): call it off the UI thread. Holds no lock while looking.
+    pub fn check_missing(&self) {
+        let known = self.known.lock().unwrap().clone();
+
+        let missing = known
+            .iter()
+            .filter(|v| v.is_missing())
+            .map(|v| v.id)
+            .collect();
+
+        *self.missing.lock().unwrap() = missing;
     }
 
     /// Reads from an open vault. The caller must return its own data, not references.
@@ -354,8 +371,10 @@ impl Vaults {
 
     // ---- Vaults ----
 
+    /// Does not touch the disk: `missing` is what `check_missing` last found.
     pub fn list(&self) -> Vec<VaultItem> {
         let open = self.open.lock().unwrap();
+        let missing = self.missing.lock().unwrap();
 
         self.known
             .lock()
@@ -367,7 +386,7 @@ impl Vaults {
                 path: v.path.display().to_string(),
                 unlocked: open.contains_key(&v.id),
                 remember_password: v.remember_password,
-                missing: v.is_missing(),
+                missing: missing.contains(&v.id),
             })
             .collect()
     }
@@ -381,6 +400,8 @@ impl Vaults {
         }
 
         self.open.lock().unwrap().remove(&vault);
+        // Its header has just been read from the new folder.
+        self.missing.lock().unwrap().remove(&vault);
 
         let mut known = self.known.lock().unwrap();
         let entry = known
@@ -865,6 +886,24 @@ pub fn read_key_file(path: &Path) -> Result<KeyFile, String> {
 mod tests {
     use super::*;
 
+    // Checks that a vault is reported missing only after `check_missing` has looked at the disk.
+    #[test]
+    fn missing_folder_is_found_by_check_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("Vault");
+        let vaults = Vaults::at(tmp.path().join("vaults.json"));
+        vaults.create(dir.clone(), "pw").unwrap();
+
+        vaults.check_missing();
+        assert!(!vaults.list()[0].missing);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!vaults.list()[0].missing);
+
+        vaults.check_missing();
+        assert!(vaults.list()[0].missing);
+    }
+
     // `Vaults` is built by hand: `create` would write `vaults.json` to the real config folder.
     #[test]
     fn host_key_is_saved_and_forgotten() {
@@ -889,6 +928,7 @@ mod tests {
         let vaults = Vaults {
             known: Mutex::new(vec![]),
             open: Mutex::new(HashMap::from([(vault, open)])),
+            missing: Mutex::default(),
             file: None,
         };
         let key = |v: &Vaults| {

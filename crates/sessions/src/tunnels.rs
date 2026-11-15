@@ -179,10 +179,9 @@ async fn run_tunnel(sessions: Arc<Sessions>, id: Uuid, run: Uuid, vault: Uuid, s
     });
 
     // Connects right away, without waiting for the first client: an error (credentials, fingerprint)
-    // shows up immediately.
-    if dialer.session().await.is_err() {
-        return;
-    }
+    // shows up immediately. If it fails (the app started before the network was up), the tunnel keeps
+    // listening and each new connection tries again.
+    let _ = dialer.session().await;
 
     let protocol = match spec.kind {
         TunnelKind::Socks5 => proxy::Protocol::Socks5,
