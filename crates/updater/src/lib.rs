@@ -8,7 +8,8 @@
 pub use cargo_packager_updater::{Error, Update};
 
 /// GitHub redirects `latest/download` to the latest published release.
-const ENDPOINT: &str = "https://github.com/rixu-industries/vaultty/releases/latest/download/latest.json";
+const ENDPOINT: &str =
+    "https://github.com/rixu-industries/vaultty/releases/latest/download/latest.json";
 
 /// Checks whether a version newer than this one exists. Blocks while the request runs.
 pub fn check() -> Result<Option<Update>, Error> {

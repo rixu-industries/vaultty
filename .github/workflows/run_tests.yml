@@ -28,7 +28,8 @@ jobs:
         set -euo pipefail
         if [ -z "$GITHUB_BASE_REF" ]; then
           echo "Not in a PR context (i.e., push to main)"
-          COMPARE_REV="$(git rev-parse HEAD~1)"
+          # The root commit has no parent: compare it with the empty tree, so every file counts as changed.
+          COMPARE_REV="$(git rev-parse -q --verify HEAD~1 || git hash-object -t tree /dev/null)"
         else
           echo "In a PR context comparing to pull_request.base.ref"
           git fetch origin "$GITHUB_BASE_REF" --depth=350
