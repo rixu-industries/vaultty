@@ -314,7 +314,9 @@ impl AppState {
             Event::Queue(tab) => cx.emit(TabEvent::Queue(tab)),
             Event::Reload { tab, side } => cx.emit(TabEvent::Reload { tab, side }),
             Event::Clipboard(text) => {
-                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text))
+                if crate::app::prefs::Prefs::get(cx).terminal.remote_clipboard {
+                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text))
+                }
             }
             Event::VaultChanged(vault) => self.refresh_view(vault, cx),
             Event::Tunnels => cx.notify(),
