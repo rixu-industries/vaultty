@@ -103,6 +103,17 @@ pub fn start(
     Ok((Server { stop, access }, run))
 }
 
+/// Whether `host` only reaches this computer. Anything else puts the token, which travels in plain
+/// HTTP, on the network.
+pub fn is_loopback(host: &str) -> bool {
+    let host = host.trim();
+
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 /// One port on each address of the host: `localhost` is `127.0.0.1` and `::1`, and each client tries
 /// the one it wants. If one is in use, it fails as a whole; otherwise another program would receive part of the requests,
 /// along with the token. Only an address the system does not have (IPv6 disabled) is skipped.
@@ -154,6 +165,16 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 mod tests {
     use super::*;
     use vaults::Vaults;
+
+    #[test]
+    fn only_this_computer_is_loopback() {
+        assert!(is_loopback("localhost"));
+        assert!(is_loopback(" 127.0.0.1 "));
+        assert!(is_loopback("::1"));
+        assert!(!is_loopback("0.0.0.0"));
+        assert!(!is_loopback("192.168.1.20"));
+        assert!(!is_loopback("my-pc.lan"));
+    }
 
     #[test]
     fn compares_tokens() {

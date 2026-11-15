@@ -24,4 +24,5 @@ uuid = { version = "1", features = ["v4", "serde"] }
 vaults = { path = "../vaults" }
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "io-util"] }

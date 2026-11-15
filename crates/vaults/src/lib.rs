@@ -34,6 +34,8 @@ const LOCKED: &str = "The vault is locked.";
 pub struct Vaults {
     known: Mutex<Vec<KnownVault>>,
     open: Mutex<HashMap<Uuid, OpenVault>>,
+    /// Where the list is saved. `None`: the system has no configuration folder.
+    file: Option<PathBuf>,
 }
 
 // ---- Views (no secrets) ----
@@ -239,9 +241,19 @@ fn key_view(id: Uuid, key: &Key) -> KeyView {
 impl Vaults {
     /// Reads the vault list from disk. All of them start locked.
     pub fn load() -> Self {
+        Self::new(registry::file())
+    }
+
+    /// Like `load`, with the list in another file: tests must not touch the real one.
+    pub fn at(file: PathBuf) -> Self {
+        Self::new(Some(file))
+    }
+
+    fn new(file: Option<PathBuf>) -> Self {
         Self {
-            known: Mutex::new(registry::load()),
+            known: Mutex::new(registry::load(file.as_deref())),
             open: Mutex::new(HashMap::new()),
+            file,
         }
     }
 
@@ -305,7 +317,7 @@ impl Vaults {
             known.push(vault);
         }
 
-        registry::save(&known)
+        registry::save(self.file.as_deref(), &known)
     }
 
     /// The vault's folder and whether it has a remembered password.
@@ -332,7 +344,7 @@ impl Vaults {
             v.remember_password = password.is_some();
         }
 
-        registry::save(&known)
+        registry::save(self.file.as_deref(), &known)
     }
 
     // ---- Vaults ----
@@ -373,7 +385,7 @@ impl Vaults {
         entry.name = registry::name_of(&dir);
         entry.path = dir;
 
-        registry::save(&known)
+        registry::save(self.file.as_deref(), &known)
     }
 
     /// Creates an empty vault in `dir`, adds it to the list and leaves it unlocked. Takes time (Argon2).
@@ -418,7 +430,7 @@ impl Vaults {
         let mut known = self.known.lock().unwrap();
         known.retain(|v| v.id != vault);
 
-        registry::save(&known)
+        registry::save(self.file.as_deref(), &known)
     }
 
     /// Decrypts the vault at `path`. Holds no lock while running: Argon2 is slow.
@@ -873,6 +885,7 @@ mod tests {
         let vaults = Vaults {
             known: Mutex::new(vec![]),
             open: Mutex::new(HashMap::from([(vault, open)])),
+            file: None,
         };
         let key = |v: &Vaults| {
             v.with_open(vault, |o| o.hosts[&id].host_key.clone())
