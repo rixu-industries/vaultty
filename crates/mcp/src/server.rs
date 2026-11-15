@@ -212,9 +212,11 @@ mod tests {
             ..Settings::default()
         };
 
-        // Only reads `vaults.json`; writes nothing.
+        // A vault list that does not exist: the real one is not touched.
         let sessions = Sessions::new(
-            Arc::new(Vaults::load()),
+            Arc::new(Vaults::at(
+                std::env::temp_dir().join("vaultty-test-none.json"),
+            )),
             tokio::runtime::Handle::current(),
             Arc::new(|_| {}),
         );

@@ -4,13 +4,14 @@
 //! Transfers between the two panes. `plan` says what must be created and copied (and what already
 //! exists), and the tab's queue copies item by item with `copy`, one at a time.
 
+use std::collections::HashMap;
 use std::io;
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::AbortHandle;
 
-use crate::files::{EntryKind, Fs, Reader, Writer};
+use crate::files::{EntryKind, Fs, Reader, Side, Writer};
 
 const CHUNK: usize = 256 * 1024;
 const PROGRESS_EVERY: Duration = Duration::from_millis(100);
@@ -45,6 +46,7 @@ fn safe_name(name: &str) -> bool {
 /// What must be done to copy `paths` from `from` into `to_dir` on `to`.
 pub async fn plan(from: &Fs, to: &Fs, paths: &[String], to_dir: &str) -> io::Result<Vec<Item>> {
     let mut items = Vec::new();
+    let existing = listing(to, to_dir, true).await?;
 
     for path in paths {
         let entry = from
@@ -53,17 +55,47 @@ pub async fn plan(from: &Fs, to: &Fs, paths: &[String], to_dir: &str) -> io::Res
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, path.clone()))?;
 
         let dst = to.side().join(to_dir, &entry.name);
-        Box::pin(walk(from, to, entry, dst, &mut items)).await?;
+        Box::pin(walk(from, to, entry, dst, &existing, &mut items)).await?;
     }
 
     Ok(items)
 }
 
+/// What a destination folder already holds: each name and whether it is a folder. `None` on the
+/// local disk, which is asked file by file: that is cheap there, and it knows its own rules about
+/// upper and lower case.
+type Listing = Option<HashMap<String, bool>>;
+
+/// Lists `dir` on a server once, instead of one round trip per file to copy into it. `is_dir`
+/// false: it is not a folder there (missing, or a file), so there is nothing to list.
+async fn listing(to: &Fs, dir: &str, is_dir: bool) -> io::Result<Listing> {
+    if to.side() == Side::Local {
+        return Ok(None);
+    }
+
+    if !is_dir {
+        return Ok(Some(HashMap::new()));
+    }
+
+    match to.list(dir).await {
+        Ok(entries) => Ok(Some(
+            entries
+                .into_iter()
+                .map(|e| (e.name.clone(), e.is_dir()))
+                .collect(),
+        )),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Some(HashMap::new())),
+        Err(e) => Err(e),
+    }
+}
+
+/// `existing` is the listing of the folder `dst` goes into.
 async fn walk(
     from: &Fs,
     to: &Fs,
     entry: crate::files::Entry,
     dst: String,
+    existing: &Listing,
     items: &mut Vec<Item>,
 ) -> io::Result<()> {
     let mut item = Item {
@@ -92,16 +124,24 @@ async fn walk(
             let dir = item.dst.clone();
             items.push(item);
 
+            let is_dir = existing
+                .as_ref()
+                .is_some_and(|names| names.get(&entry.name) == Some(&true));
+            let inside = listing(to, &dir, is_dir).await?;
+
             let mut children = from.list(&entry.path).await?;
             children.sort_by(|a, b| a.name.cmp(&b.name));
 
             for child in children {
                 let dst = to.side().join(&dir, &child.name);
-                Box::pin(walk(from, to, child, dst, items)).await?;
+                Box::pin(walk(from, to, child, dst, &inside, items)).await?;
             }
         }
         EntryKind::File | EntryKind::Link => {
-            item.exists = to.stat(&item.dst).await?.is_some();
+            item.exists = match existing {
+                Some(names) => names.contains_key(&entry.name),
+                None => to.stat(&item.dst).await?.is_some(),
+            };
             items.push(item);
         }
     }
