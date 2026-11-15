@@ -25,9 +25,15 @@ use crate::tools::{Ask, Tools};
 pub struct Server {
     stop: CancellationToken,
     access: Arc<Mutex<Vec<VaultAccess>>>,
+    port: u16,
 }
 
 impl Server {
+    /// The port it listens on: the one in the settings or, if that was 0, the one the system gave it.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
     /// Changes the vaults and permissions without restarting: takes effect from the next call.
     pub fn set_vaults(&self, vaults: Vec<VaultAccess>) {
         *self.access.lock().unwrap() = vaults;
@@ -49,7 +55,8 @@ pub fn start(
     sessions: Arc<Sessions>,
     ask: Ask,
 ) -> Result<(Server, impl Future<Output = ()> + Send + 'static), String> {
-    let listeners = bind(&settings.host, settings.port)
+    let (port, listeners) = bind(&settings.host, settings.port)
+        .and_then(|listeners| Ok((listeners[0].local_addr()?.port(), listeners)))
         .map_err(|e| format!("Could not open {}:{}: {e}", settings.host, settings.port))?;
 
     let stop = CancellationToken::new();
@@ -100,7 +107,7 @@ pub fn start(
         all.join_all().await;
     };
 
-    Ok((Server { stop, access }, run))
+    Ok((Server { stop, access, port }, run))
 }
 
 /// Whether `host` only reaches this computer. Anything else puts the token, which travels in plain
@@ -208,7 +215,7 @@ mod tests {
     async fn requires_token_and_host_and_answers_initialize() {
         let settings = Settings {
             host: "127.0.0.1".into(),
-            port: 47699,
+            port: 0,
             ..Settings::default()
         };
 
@@ -226,18 +233,20 @@ mod tests {
             start(&settings, "secret".into(), sessions.clone(), ask.clone()).unwrap();
         tokio::spawn(run);
 
-        let ok = post(47699, "127.0.0.1", "secret").await;
+        let port = server.port();
+        let ok = post(port, "127.0.0.1", "secret").await;
         assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
         assert!(ok.contains("serverInfo"), "{ok}");
 
-        let wrong_token = post(47699, "127.0.0.1", "other").await;
+        let wrong_token = post(port, "127.0.0.1", "other").await;
         assert!(wrong_token.starts_with("HTTP/1.1 401"), "{wrong_token}");
 
-        let wrong_host = post(47699, "evil.example", "secret").await;
+        let wrong_host = post(port, "evil.example", "secret").await;
         assert!(!wrong_host.starts_with("HTTP/1.1 200"), "{wrong_host}");
 
         // While it is running, the port is in use.
-        assert!(start(&settings, "x".into(), sessions, ask).is_err());
+        let taken = Settings { port, ..settings };
+        assert!(start(&taken, "x".into(), sessions, ask).is_err());
 
         drop(server);
     }

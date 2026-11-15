@@ -19,6 +19,7 @@ use rmcp::schemars::{self, JsonSchema};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use sessions::Sessions;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use vaults::{Exec, HostInput, HostView, McpPerms, MethodView, VaultView};
 
@@ -732,6 +733,7 @@ impl Tools {
     async fn run_command(
         &self,
         Parameters(arg): Parameters<RunArg>,
+        cancelled: CancellationToken,
     ) -> Result<Json<RunOut>, String> {
         let (vault, host, perms) = self.find_host(arg.vault.as_deref(), &arg.host)?;
         let method = method_of(&host, arg.method.as_deref())?;
@@ -784,7 +786,7 @@ impl Tools {
             let running = job.clone();
             tokio::spawn(async move { running.run(&sessions).await });
         } else {
-            job.run(&self.sessions).await;
+            job.run_unless(&self.sessions, &cancelled).await;
         }
 
         Ok(Json(job_out(&job)))
@@ -962,7 +964,7 @@ mod tests {
             sessions,
             access: Arc::new(Mutex::new(vec![VaultAccess { id: vault, perms }])),
             ask: Arc::new(|_| Box::pin(async { false })),
-            jobs: Arc::new(Jobs::new(tokio_util::sync::CancellationToken::new())),
+            jobs: Arc::new(Jobs::new(CancellationToken::new())),
         };
 
         (tmp, tools, vault, host)
@@ -1013,7 +1015,12 @@ mod tests {
             NO_WRITE
         );
         assert_eq!(tools.delete_host(host_arg("web")).err().unwrap(), NO_WRITE);
-        assert!(tools.run_command(run("web")).await.is_err());
+        assert!(
+            tools
+                .run_command(run("web"), CancellationToken::new())
+                .await
+                .is_err()
+        );
 
         let view = tools.sessions.vaults().view(vault).unwrap();
         assert_eq!(view.hosts.len(), 1);
@@ -1033,7 +1040,12 @@ mod tests {
 
         assert!(tools.save_host(edit("web", None, Some("x"))).is_err());
         assert!(tools.delete_host(host_arg("web")).is_err());
-        assert!(tools.run_command(run("web")).await.is_err());
+        assert!(
+            tools
+                .run_command(run("web"), CancellationToken::new())
+                .await
+                .is_err()
+        );
         assert_eq!(tools.sessions.vaults().view(vault).unwrap().hosts.len(), 1);
     }
 

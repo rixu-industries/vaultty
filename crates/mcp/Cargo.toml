@@ -18,7 +18,7 @@ serde = { version = "1", features = ["derive"] }
 sessions = { path = "../sessions" }
 settings = { path = "../settings" }
 ssh = { path = "../ssh" }
-tokio = { version = "1", features = ["net", "time"] }
+tokio = { version = "1", features = ["net", "sync", "time"] }
 tokio-util = "0.7"
 uuid = { version = "1", features = ["v4", "serde"] }
 vaults = { path = "../vaults" }

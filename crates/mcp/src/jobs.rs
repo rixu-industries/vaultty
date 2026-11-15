@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sessions::{ConnectError, Output, Sessions};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -32,22 +33,40 @@ pub(crate) struct Job {
     pub command: String,
     pub timeout: Duration,
     pub out: Mutex<Output>,
-    pub state: Mutex<State>,
+    /// A channel, so that `wait` learns of the change without polling.
+    pub state: watch::Sender<State>,
     /// Child of the server's token: shutting down the server stops it for everyone.
     pub stop: CancellationToken,
 }
 
 impl Job {
     pub fn state(&self) -> State {
-        self.state.lock().unwrap().clone()
+        self.state.borrow().clone()
     }
 
     /// Waits until it stops running, for at most `max`. This way the agent does not have to poll in a loop.
     pub async fn wait(&self, max: Duration) {
-        let deadline = tokio::time::Instant::now() + max;
+        let mut state = self.state.subscribe();
+        let stopped = state.wait_for(|s| *s != State::Running);
 
-        while self.state() == State::Running && tokio::time::Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(200)).await;
+        let _ = tokio::time::timeout(max, stopped).await;
+    }
+
+    /// Like `run`, and also stops it when the client cancels its request. `rmcp` does not drop the tool's
+    /// future on a cancellation, it only cancels this token: without this, the command would run on to its
+    /// timeout. The run is awaited to the end either way, so that the remote process gets its `KILL`.
+    pub async fn run_unless(&self, sessions: &Sessions, cancelled: &CancellationToken) {
+        let run = self.run(sessions);
+        tokio::pin!(run);
+
+        tokio::select! {
+            biased;
+
+            () = cancelled.cancelled() => {
+                self.stop.cancel();
+                run.await;
+            }
+            () = &mut run => {}
         }
     }
 
@@ -71,12 +90,12 @@ impl Job {
             )
             .await;
 
-        *self.state.lock().unwrap() = match result {
+        self.state.send_replace(match result {
             Ok(true) => State::Done,
             Ok(false) if self.stop.is_cancelled() => State::Stopped,
             Ok(false) => State::TimedOut,
             Err(e) => State::Failed(explain(e)),
-        };
+        });
     }
 }
 
@@ -135,7 +154,7 @@ impl Jobs {
             command,
             timeout,
             out: Mutex::default(),
-            state: Mutex::new(State::Running),
+            state: watch::Sender::new(State::Running),
             stop: self.stop.child_token(),
         })
     }
@@ -187,12 +206,12 @@ mod tests {
         jobs.keep(running.clone());
 
         let first_done = job();
-        *first_done.state.lock().unwrap() = State::Done;
+        first_done.state.send_replace(State::Done);
         jobs.keep(first_done.clone());
 
         for _ in 0..KEEP - 1 {
             let j = job();
-            *j.state.lock().unwrap() = State::Done;
+            j.state.send_replace(State::Done);
             jobs.keep(j);
         }
 
@@ -215,5 +234,61 @@ mod tests {
 
         server.cancel();
         assert!(job.stop.is_cancelled());
+    }
+
+    // Checks that waiting ends as soon as the command does, not when the maximum runs out.
+    #[tokio::test]
+    async fn waiting_ends_when_the_command_does() {
+        let jobs = Jobs::new(CancellationToken::new());
+        let job = jobs.new_job(
+            Uuid::nil(),
+            Uuid::nil(),
+            Uuid::nil(),
+            String::new(),
+            Duration::ZERO,
+        );
+
+        let waiting = job.clone();
+        let wait = tokio::spawn(async move { waiting.wait(Duration::from_secs(3600)).await });
+
+        job.state.send_replace(State::Done);
+
+        tokio::time::timeout(Duration::from_secs(5), wait)
+            .await
+            .expect("it kept waiting after the command finished")
+            .unwrap();
+
+        // Already finished: it does not wait at all.
+        tokio::time::timeout(Duration::from_secs(5), job.wait(Duration::from_secs(3600)))
+            .await
+            .expect("it waited for a finished command");
+    }
+
+    // Checks that a foreground command is stopped when the client cancels its request.
+    #[tokio::test]
+    async fn a_cancelled_request_stops_its_command() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sessions = Sessions::new(
+            Arc::new(vaults::Vaults::at(tmp.path().join("vaults.json"))),
+            tokio::runtime::Handle::current(),
+            Arc::new(|_| {}),
+        );
+
+        let jobs = Jobs::new(CancellationToken::new());
+        let job = jobs.new_job(
+            Uuid::nil(),
+            Uuid::nil(),
+            Uuid::nil(),
+            String::new(),
+            Duration::from_secs(3600),
+        );
+
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+
+        job.run_unless(&sessions, &cancelled).await;
+
+        assert!(job.stop.is_cancelled());
+        assert_ne!(job.state(), State::Running);
     }
 }
