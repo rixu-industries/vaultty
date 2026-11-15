@@ -285,12 +285,17 @@ impl Vaults {
         id: Uuid,
         edit: impl FnOnce(&mut Host),
     ) -> Result<(), String> {
-        let mut host = self
-            .with_open(vault, |v| v.hosts.get(&id).cloned())?
-            .ok_or("The host no longer exists.")?;
+        // Read and saved under the same lock: a change made in between by another thread would be lost.
+        self.change(vault, |open| {
+            let mut host = open
+                .hosts
+                .get(&id)
+                .cloned()
+                .ok_or("The host no longer exists.")?;
 
-        edit(&mut host);
-        self.change(vault, |open| open.save(id, Record::Host(host)))
+            edit(&mut host);
+            open.save(id, Record::Host(host))
+        })
     }
 
     /// Copy of the host and of the key the method uses, with their secrets. Only to open the SSH
@@ -578,34 +583,30 @@ impl Vaults {
             return Err("The name, address or port is missing.".into());
         }
 
-        let existing = match id {
-            Some(id) => self.with_open(vault, |v| v.hosts.get(&id).cloned())?,
-            None => None,
-        };
-
-        let same = existing
-            .as_ref()
-            .filter(|h| h.address == address && h.port == host.port);
-
-        let new_host = Host {
-            // When editing, the access methods it already had are kept.
-            access_methods: existing
-                .as_ref()
-                .map(|h| h.access_methods.clone())
-                .unwrap_or_default(),
-            notes: host.notes.trim().to_string(),
-            // The fingerprint and OS are kept if it is still the same server; if the address changes, they are looked up again.
-            host_key: same.and_then(|h| h.host_key.clone()),
-            os: same.and_then(|h| h.os.clone()),
-            mcp: existing.as_ref().and_then(|h| h.mcp),
-            name,
-            address,
-            port: host.port,
-            group_id: host.group_id,
-        };
-
         let host_id = id.unwrap_or_else(Uuid::new_v4);
-        self.change(vault, |open| open.save(host_id, Record::Host(new_host)))?;
+
+        self.change(vault, |open| {
+            let existing = id.and_then(|id| open.hosts.get(&id));
+            let same = existing.filter(|h| h.address == address && h.port == host.port);
+
+            let new_host = Host {
+                // When editing, the access methods it already had are kept.
+                access_methods: existing
+                    .map(|h| h.access_methods.clone())
+                    .unwrap_or_default(),
+                notes: host.notes.trim().to_string(),
+                // The fingerprint and OS are kept if it is still the same server; if the address changes, they are looked up again.
+                host_key: same.and_then(|h| h.host_key.clone()),
+                os: same.and_then(|h| h.os.clone()),
+                mcp: existing.and_then(|h| h.mcp),
+                name,
+                address,
+                port: host.port,
+                group_id: host.group_id,
+            };
+
+            open.save(host_id, Record::Host(new_host))
+        })?;
 
         Ok(host_id)
     }
@@ -616,18 +617,18 @@ impl Vaults {
             return Err("The name is missing.".into());
         }
 
-        let parent_id = match id {
-            Some(id) => self.with_open(vault, |v| v.groups.get(&id).and_then(|g| g.parent_id))?,
-            None => None,
-        };
-
-        let group = Group {
-            name: name.trim().to_string(),
-            parent_id,
-        };
-
         let group_id = id.unwrap_or_else(Uuid::new_v4);
-        self.change(vault, |open| open.save(group_id, Record::Group(group)))?;
+
+        self.change(vault, |open| {
+            let group = Group {
+                name: name.trim().to_string(),
+                parent_id: id
+                    .and_then(|id| open.groups.get(&id))
+                    .and_then(|g| g.parent_id),
+            };
+
+            open.save(group_id, Record::Group(group))
+        })?;
 
         Ok(group_id)
     }
@@ -718,7 +719,9 @@ impl Vaults {
             kind => kind,
         };
 
-        let (enabled, taken, target) = self.with_open(vault, |v| {
+        let tunnel_id = id.unwrap_or_else(Uuid::new_v4);
+
+        self.change(vault, |v| {
             let enabled = id
                 .and_then(|id| v.tunnels.get(&id))
                 .is_none_or(|t| t.enabled);
@@ -737,41 +740,42 @@ impl Vaults {
                 .get(&tunnel.host_id)
                 .is_some_and(|h| h.access_methods.iter().any(|m| m.id == tunnel.method_id));
 
-            (enabled, taken, target)
+            if taken {
+                return Err(format!("Another tunnel already uses port {}.", tunnel.port));
+            }
+
+            if !target {
+                return Err("The host or access method no longer exists.".into());
+            }
+
+            let record = Tunnel {
+                name,
+                kind,
+                bind,
+                port: tunnel.port,
+                host_id: tunnel.host_id,
+                method_id: tunnel.method_id,
+                enabled,
+            };
+
+            v.save(tunnel_id, Record::Tunnel(record))
         })?;
-
-        if taken {
-            return Err(format!("Another tunnel already uses port {}.", tunnel.port));
-        }
-
-        if !target {
-            return Err("The host or access method no longer exists.".into());
-        }
-
-        let record = Tunnel {
-            name,
-            kind,
-            bind,
-            port: tunnel.port,
-            host_id: tunnel.host_id,
-            method_id: tunnel.method_id,
-            enabled,
-        };
-
-        let tunnel_id = id.unwrap_or_else(Uuid::new_v4);
-        self.change(vault, |open| open.save(tunnel_id, Record::Tunnel(record)))?;
 
         Ok(tunnel_id)
     }
 
     /// Enables or disables a tunnel. Starting or stopping it is up to the caller (`sessions`).
     pub fn set_tunnel_enabled(&self, vault: Uuid, id: Uuid, enabled: bool) -> Result<(), String> {
-        let mut tunnel = self
-            .with_open(vault, |v| v.tunnels.get(&id).cloned())?
-            .ok_or("The tunnel no longer exists.")?;
+        self.change(vault, |open| {
+            let mut tunnel = open
+                .tunnels
+                .get(&id)
+                .cloned()
+                .ok_or("The tunnel no longer exists.")?;
 
-        tunnel.enabled = enabled;
-        self.change(vault, |open| open.save(id, Record::Tunnel(tunnel)))
+            tunnel.enabled = enabled;
+            open.save(id, Record::Tunnel(tunnel))
+        })
     }
 
     // ---- Keychain ----

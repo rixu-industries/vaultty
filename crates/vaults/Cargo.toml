@@ -12,7 +12,7 @@ doctest = false
 
 [dependencies]
 core = { path = "../core" }
-dirs = "6"
+settings = { path = "../settings" }
 keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

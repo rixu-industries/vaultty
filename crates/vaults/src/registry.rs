@@ -22,7 +22,7 @@ pub struct KnownVault {
 }
 
 pub fn file() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("vaultty").join("vaults.json"))
+    Some(settings::dir()?.join("vaults.json"))
 }
 
 /// Reads the list. If it does not exist or is damaged, it starts empty: losing it does not lose any vault.
@@ -37,7 +37,7 @@ pub fn save(file: Option<&Path>, vaults: &[KnownVault]) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(vaults).expect("the list always serializes");
 
     fs::create_dir_all(file.parent().expect("has a parent folder"))
-        .and_then(|_| fs::write(file, json))
+        .and_then(|_| settings::write_atomic(file, &json))
         .map_err(|e| format!("Could not save the vault list: {e}"))
 }
 

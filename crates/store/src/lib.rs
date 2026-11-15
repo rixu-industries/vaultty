@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
@@ -165,18 +164,9 @@ fn file_name(id: Uuid) -> String {
 
 /// Writes to a temporary file and renames it: a power cut never leaves a half-written file.
 fn write_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), Error> {
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.tmp"));
-    let mut file = fs::File::create(&tmp)?;
+    let json = serde_json::to_vec_pretty(value).expect("vault types always serialize");
 
-    file.write_all(&serde_json::to_vec_pretty(value).expect("vault types always serialize"))?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&tmp, path)?;
-    Ok(())
+    Ok(settings::write_atomic(path, &json)?)
 }
 
 #[cfg(test)]
