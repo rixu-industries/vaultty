@@ -3,7 +3,8 @@
 
 //! Detail view of a tunnel: its status, route and actions.
 
-use crate::app::state::{AppState, Tab};
+use crate::app::state::AppState;
+use crate::app::tabs::Tab;
 use crate::app::theme::px;
 use crate::app::theme::{colors, mono_font};
 use crate::components::{Button, ButtonVariant, Switch, property, section_title};

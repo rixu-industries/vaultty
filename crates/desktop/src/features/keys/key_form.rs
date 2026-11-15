@@ -3,7 +3,8 @@
 
 //! Form to import or edit a keychain key.
 
-use crate::app::state::{AppState, Tab, pick};
+use crate::app::state::{AppState, pick};
+use crate::app::tabs::Tab;
 use crate::app::theme::px;
 use crate::app::theme::{colors, mono_font};
 use crate::components::WindowExt;

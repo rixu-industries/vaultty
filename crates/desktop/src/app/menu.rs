@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use crate::app::prefs::Prefs;
 use crate::app::shell;
-use crate::app::state::{AppState, Route, Section, Tab, pick};
+use crate::app::state::{AppState, Route, Section, pick};
+use crate::app::tabs::Tab;
 use crate::features::hosts::group_form::open_group_form;
 use crate::features::hosts::host_form::open_host_form;
 use crate::features::keys::generate::open_generate;
@@ -312,7 +313,7 @@ fn cycle_tab(step: isize, cx: &mut App) {
     let state = shell::state(cx);
 
     state.update(cx, |s, cx| {
-        let pane = s.active.and_then(|id| s.pane_of(id));
+        let pane = s.tabs.active.and_then(|id| s.pane_of(id));
         let tabs: Vec<Uuid> = s
             .visible()
             .filter(|t| pane.is_none_or(|p| t.pane == p))
@@ -325,6 +326,7 @@ fn cycle_tab(step: isize, cx: &mut App) {
         }
 
         let at = s
+            .tabs
             .active
             .and_then(|id| tabs.iter().position(|t| *t == id))
             .map_or(if step > 0 { -1 } else { 0 }, |i| i as isize);
@@ -439,7 +441,7 @@ fn actions(cx: &mut App) {
     });
     cx.on_action(|_: &CloseTab, cx| {
         shell::state(cx).update(cx, |s, cx| {
-            if let Some(id) = s.active {
+            if let Some(id) = s.tabs.active {
                 s.close_tab(id, cx);
             }
         });

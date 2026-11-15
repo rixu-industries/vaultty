@@ -7,5 +7,6 @@ pub mod menu;
 pub mod prefs;
 pub mod shell;
 pub mod state;
+pub mod tabs;
 pub mod theme;
 pub mod workspace;

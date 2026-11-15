@@ -3,7 +3,8 @@
 
 //! List of tunnels, in the sidebar.
 
-use crate::app::state::{AppState, Tab};
+use crate::app::state::AppState;
+use crate::app::tabs::Tab;
 use crate::app::theme::colors;
 use crate::app::theme::px;
 use crate::components::{ContextMenuExt, PopupMenuItem, confirm, tree_row};

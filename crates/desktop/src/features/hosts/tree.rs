@@ -3,7 +3,8 @@
 
 //! Host tree in the sidebar, grouped by folder, with drag to change group and context menus.
 
-use crate::app::state::{AppState, Tab};
+use crate::app::state::AppState;
+use crate::app::tabs::Tab;
 use crate::app::theme::colors;
 use crate::app::theme::px;
 use crate::components::{

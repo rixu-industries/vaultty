@@ -17,7 +17,8 @@ use sessions::TabKind;
 use uuid::Uuid;
 
 use crate::app::prefs::Prefs;
-use crate::app::state::{AppState, Edge, Pane, Route, Tab};
+use crate::app::state::{AppState, Route};
+use crate::app::tabs::{Edge, Pane, Tab};
 use crate::app::theme::{colors, px};
 use crate::features::hosts::detail::host_detail;
 use crate::features::hosts::known::known_hosts;
@@ -111,7 +112,7 @@ impl Workspace {
     fn sync(&mut self, state: &Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) {
         let (tabs, sessions) = {
             let s = state.read(cx);
-            (s.tabs.clone(), s.session_list.clone())
+            (s.tabs.list.clone(), s.session_list.clone())
         };
         let open = |id: &Uuid| tabs.iter().any(|t| t.id == *id);
 
@@ -177,7 +178,7 @@ impl Workspace {
     fn content(&self, vault: Uuid, window: &mut Window, cx: &App) -> AnyElement {
         let s = self.state.read(cx);
 
-        self.panes(&s.panes, cx)
+        self.panes(&s.tabs.panes, cx)
             .unwrap_or_else(|| layout::empty(&self.state, vault, window, cx))
     }
 
@@ -227,12 +228,13 @@ impl Workspace {
     fn leaf(&self, pane: Uuid, cx: &App) -> Option<AnyElement> {
         let s = self.state.read(cx);
         let id = s.shown(pane)?;
-        let tab = s.tabs.iter().find(|t| t.id == id)?.tab;
+        let tab = s.tabs.list.iter().find(|t| t.id == id)?.tab;
         let c = colors();
         let (focus, track, drop) = (self.state.clone(), self.state.clone(), self.state.clone());
 
         // The half (or all of it, in the center) the tab will take: x, y, width and height in fractions.
         let preview = s
+            .tabs
             .drop_target
             .filter(|(p, _)| *p == pane && cx.has_active_drag())
             .map(|(_, edge)| {
@@ -263,7 +265,7 @@ impl Workspace {
                 // In the capture phase: the terminal and SFTP stop the click before it bubbles up.
                 .capture_any_mouse_down(move |_, _, cx| {
                     focus.update(cx, |s, cx| {
-                        if s.active != Some(id) {
+                        if s.tabs.active != Some(id) {
                             s.show_tab(id, cx);
                         }
                     })
@@ -290,7 +292,9 @@ impl Workspace {
                         })
                         .on_drop(move |drag: &DragTab, _, cx| {
                             drop.update(cx, |s, cx| {
-                                if let Some((_, edge)) = s.drop_target.filter(|(p, _)| *p == pane) {
+                                if let Some((_, edge)) =
+                                    s.tabs.drop_target.filter(|(p, _)| *p == pane)
+                                {
                                     s.drop_tab(drag.id, pane, edge, cx);
                                 }
                             })

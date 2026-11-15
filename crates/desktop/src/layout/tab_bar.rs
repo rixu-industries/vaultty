@@ -5,7 +5,8 @@
 //! with drag to reorder them or move them to another pane. Detail tabs (host, key, tunnel) open as a preview (in
 //! italics) and the next one replaces it; double-click pins it.
 
-use crate::app::state::{AppState, OpenTab, Tab};
+use crate::app::state::AppState;
+use crate::app::tabs::{OpenTab, Tab};
 use crate::app::theme::colors;
 use crate::app::theme::px;
 use crate::components::{ContextMenuExt, DragLabel, PopupMenuItem, icon, os_icon};
@@ -121,7 +122,7 @@ pub fn tab_bar(state: &Entity<AppState>, pane: Uuid, cx: &App) -> impl IntoEleme
         let session = matches!(open.tab, Tab::Session(_));
         let active = shown == Some(id);
         let (leading, title) = label(s, open);
-        let title = s.renames.get(&id).cloned().unwrap_or(title);
+        let title = s.tabs.renames.get(&id).cloned().unwrap_or(title);
 
         let (show, close, drop, menu, over) = (
             state.clone(),
@@ -186,7 +187,7 @@ pub fn tab_bar(state: &Entity<AppState>, pane: Uuid, cx: &App) -> impl IntoEleme
             // before it if coming from the right. `border_color` tints all borders, so the others are
             // removed; the padding offsets the width so the text does not move.
             .drag_over::<DragTab>(move |style, drag: &DragTab, _, cx| {
-                let tabs = &over.read(cx).tabs;
+                let tabs = &over.read(cx).tabs.list;
                 let at = |t| tabs.iter().position(|o| o.id == t);
                 let style = style.border_0().border_color(c.tab_drop);
 
