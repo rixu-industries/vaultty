@@ -1,0 +1,395 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/rixu-industries/vaultty/main/crates/themes/schema/theme-v1.json",
+  "title": "Vaultty theme family",
+  "description": "A file with one or more Vaultty themes. Keys a theme leaves out come from the built-in theme of the same appearance.",
+  "type": "object",
+  "required": [
+    "name",
+    "themes"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "Name of the family."
+    },
+    "author": {
+      "type": "string"
+    },
+    "themes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/theme"
+      }
+    }
+  },
+  "$defs": {
+    "color": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+      "description": "#rgb, #rrggbb or #rrggbbaa."
+    },
+    "theme": {
+      "type": "object",
+      "required": [
+        "name",
+        "appearance"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Shown in Settings. Must be unique across all installed themes."
+        },
+        "appearance": {
+          "enum": [
+            "light",
+            "dark"
+          ]
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "background": {
+              "$ref": "#/$defs/color",
+              "description": "Main window background."
+            },
+            "foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Main text color."
+            },
+            "card": {
+              "$ref": "#/$defs/color",
+              "description": "Cards and raised surfaces. Also the default for the title, tab and status bars."
+            },
+            "popover": {
+              "$ref": "#/$defs/color",
+              "description": "Menus, dropdowns and dialogs."
+            },
+            "primary": {
+              "$ref": "#/$defs/color",
+              "description": "Primary buttons, focus outline and the selected item marker."
+            },
+            "primary.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Text on primary buttons."
+            },
+            "secondary": {
+              "$ref": "#/$defs/color",
+              "description": "Secondary buttons and muted surfaces."
+            },
+            "muted.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Secondary text, labels and hints."
+            },
+            "accent": {
+              "$ref": "#/$defs/color",
+              "description": "Hover background."
+            },
+            "destructive": {
+              "$ref": "#/$defs/color",
+              "description": "Delete actions and errors."
+            },
+            "destructive.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Text on destructive buttons."
+            },
+            "border": {
+              "$ref": "#/$defs/color",
+              "description": "Borders and separators."
+            },
+            "sidebar": {
+              "$ref": "#/$defs/color",
+              "description": "Side panel background."
+            },
+            "sidebar.accent": {
+              "$ref": "#/$defs/color",
+              "description": "Selected item in the side panel and lists."
+            },
+            "success": {
+              "$ref": "#/$defs/color",
+              "description": "Connected states and confirmations."
+            },
+            "warning": {
+              "$ref": "#/$defs/color",
+              "description": "Warnings."
+            },
+            "card.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Text on cards. Defaults to foreground."
+            },
+            "popover.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Text in menus and dialogs. Defaults to foreground."
+            },
+            "secondary.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Text on secondary buttons. Defaults to foreground."
+            },
+            "muted": {
+              "$ref": "#/$defs/color",
+              "description": "Muted surfaces such as keyboard hints. Defaults to secondary."
+            },
+            "accent.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Text on hovered items. Defaults to foreground."
+            },
+            "input": {
+              "$ref": "#/$defs/color",
+              "description": "Text field border. Defaults to border."
+            },
+            "input.background": {
+              "$ref": "#/$defs/color",
+              "description": "Text field background. Defaults to background."
+            },
+            "ring": {
+              "$ref": "#/$defs/color",
+              "description": "Focus outline of text fields. Defaults to primary."
+            },
+            "selection": {
+              "$ref": "#/$defs/color",
+              "description": "Selected text in fields. Defaults to primary at 25%."
+            },
+            "overlay": {
+              "$ref": "#/$defs/color",
+              "description": "Backdrop behind dialogs. Defaults to black at 40%."
+            },
+            "sidebar.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Text in the side panel. Defaults to foreground."
+            },
+            "sidebar.border": {
+              "$ref": "#/$defs/color",
+              "description": "Side panel border. Defaults to border."
+            },
+            "sidebar.resize": {
+              "$ref": "#/$defs/color",
+              "description": "Side panel edge while hovering to resize it. Defaults to ring."
+            },
+            "primary.hover": {
+              "$ref": "#/$defs/color",
+              "description": "Hovered primary button. Defaults to primary at 88%."
+            },
+            "primary.active": {
+              "$ref": "#/$defs/color",
+              "description": "Pressed primary button. Defaults to primary at 80%."
+            },
+            "secondary.hover": {
+              "$ref": "#/$defs/color",
+              "description": "Hovered secondary, outline and ghost buttons. Defaults to accent."
+            },
+            "destructive.hover": {
+              "$ref": "#/$defs/color",
+              "description": "Hovered destructive button. Defaults to destructive at 88%."
+            },
+            "destructive.active": {
+              "$ref": "#/$defs/color",
+              "description": "Pressed destructive button. Defaults to destructive at 80%."
+            },
+            "destructive.subtle": {
+              "$ref": "#/$defs/color",
+              "description": "Hovered delete action in rows and toolbars. Defaults to destructive at 12%."
+            },
+            "highlight": {
+              "$ref": "#/$defs/color",
+              "description": "Drop targets and selected files. Defaults to primary at 10%."
+            },
+            "muted.icon": {
+              "$ref": "#/$defs/color",
+              "description": "Dimmed icons. Defaults to muted.foreground at 60%."
+            },
+            "disabled.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Disabled items. Defaults to muted.foreground at 50%."
+            },
+            "border.subtle": {
+              "$ref": "#/$defs/color",
+              "description": "Soft separators. Defaults to border at 50%."
+            },
+            "scrollbar.thumb": {
+              "$ref": "#/$defs/color",
+              "description": "Scrollbar thumb. Defaults to muted.foreground at 30%."
+            },
+            "scrollbar.thumb.hover": {
+              "$ref": "#/$defs/color",
+              "description": "Hovered scrollbar thumb. Defaults to muted.foreground at 50%."
+            },
+            "titlebar.background": {
+              "$ref": "#/$defs/color",
+              "description": "Title bar. Defaults to card."
+            },
+            "titlebar.border": {
+              "$ref": "#/$defs/color",
+              "description": "Title bar bottom border. Defaults to border."
+            },
+            "panel.header.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Side panel title. Defaults to muted.foreground."
+            },
+            "list.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "List and tree rows. Defaults to foreground at 90%."
+            },
+            "list.hover": {
+              "$ref": "#/$defs/color",
+              "description": "Hovered row. Defaults to accent."
+            },
+            "list.active": {
+              "$ref": "#/$defs/color",
+              "description": "Selected row. Defaults to sidebar.accent."
+            },
+            "list.active.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Selected row text. Defaults to foreground."
+            },
+            "list.active.indicator": {
+              "$ref": "#/$defs/color",
+              "description": "Mark on the left of the selected row. Defaults to primary."
+            },
+            "list.drop": {
+              "$ref": "#/$defs/color",
+              "description": "Group outline while dropping a host on it. Defaults to primary."
+            },
+            "tab.background": {
+              "$ref": "#/$defs/color",
+              "description": "Tab bar and inactive tabs. Defaults to card."
+            },
+            "tab.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Inactive tab title. Defaults to muted.foreground."
+            },
+            "tab.hover.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Hovered inactive tab title. Defaults to foreground."
+            },
+            "tab.active.background": {
+              "$ref": "#/$defs/color",
+              "description": "Active tab. Defaults to background."
+            },
+            "tab.active.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Active tab title. Defaults to foreground."
+            },
+            "tab.border": {
+              "$ref": "#/$defs/color",
+              "description": "Tab separators. Defaults to border."
+            },
+            "tab.close.hover": {
+              "$ref": "#/$defs/color",
+              "description": "Hovered close button of a tab. Defaults to accent."
+            },
+            "tab.drop": {
+              "$ref": "#/$defs/color",
+              "description": "Insertion mark while dragging a tab. Defaults to primary."
+            },
+            "statusbar.background": {
+              "$ref": "#/$defs/color",
+              "description": "Status bar. Defaults to card."
+            },
+            "statusbar.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Status bar text and icons. Defaults to muted.foreground."
+            },
+            "statusbar.border": {
+              "$ref": "#/$defs/color",
+              "description": "Status bar top border. Defaults to border."
+            },
+            "statusbar.item.active": {
+              "$ref": "#/$defs/color",
+              "description": "Status bar button of the open panel. Defaults to sidebar.accent."
+            },
+            "statusbar.item.active.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Icon of the open panel. Defaults to foreground."
+            },
+            "terminal.background": {
+              "$ref": "#/$defs/color",
+              "description": "Terminal background. Defaults to the theme's background."
+            },
+            "terminal.foreground": {
+              "$ref": "#/$defs/color",
+              "description": "Terminal text. Defaults to the theme's foreground."
+            },
+            "terminal.cursor": {
+              "$ref": "#/$defs/color",
+              "description": "Terminal cursor. Defaults to terminal.foreground."
+            },
+            "terminal.selection": {
+              "$ref": "#/$defs/color",
+              "description": "Selected text in the terminal. Defaults to the theme's accent."
+            },
+            "terminal.ansi.black": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI black."
+            },
+            "terminal.ansi.red": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI red."
+            },
+            "terminal.ansi.green": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI green."
+            },
+            "terminal.ansi.yellow": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI yellow."
+            },
+            "terminal.ansi.blue": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI blue."
+            },
+            "terminal.ansi.magenta": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI magenta."
+            },
+            "terminal.ansi.cyan": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI cyan."
+            },
+            "terminal.ansi.white": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI white."
+            },
+            "terminal.ansi.bright_black": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI bright black."
+            },
+            "terminal.ansi.bright_red": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI bright red."
+            },
+            "terminal.ansi.bright_green": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI bright green."
+            },
+            "terminal.ansi.bright_yellow": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI bright yellow."
+            },
+            "terminal.ansi.bright_blue": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI bright blue."
+            },
+            "terminal.ansi.bright_magenta": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI bright magenta."
+            },
+            "terminal.ansi.bright_cyan": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI bright cyan."
+            },
+            "terminal.ansi.bright_white": {
+              "$ref": "#/$defs/color",
+              "description": "ANSI bright white."
+            }
+          }
+        }
+      }
+    }
+  }
+}

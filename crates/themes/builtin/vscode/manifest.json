@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "vscode",
+  "name": "VS Code",
+  "version": "1.0.0",
+  "description": "Vaultty port of the VS Code colors for VS Code.",
+  "authors": [
+    "Microsoft"
+  ],
+  "repository": "https://github.com/microsoft/vscode",
+  "license": "MIT",
+  "themes": [
+    "themes/vscode.json"
+  ]
+}

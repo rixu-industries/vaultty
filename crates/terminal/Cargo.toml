@@ -1,0 +1,16 @@
+[package]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+name = "terminal"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+alacritty_terminal = "=0.26.0"
+serde = { version = "1", features = ["derive"] }
+settings = { path = "../settings" }

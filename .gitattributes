@@ -1,0 +1,5 @@
+# Bash scripts must keep LF line endings even on Windows checkouts with core.autocrlf, or Git Bash cannot run them.
+scripts/linux text eol=lf
+scripts/clippy text eol=lf
+scripts/check-todos text eol=lf
+scripts/shellcheck-scripts text eol=lf

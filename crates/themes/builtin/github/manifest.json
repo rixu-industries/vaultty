@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "github",
+  "name": "GitHub",
+  "version": "1.0.0",
+  "description": "Vaultty port of the GitHub colors for VS Code.",
+  "authors": [
+    "GitHub"
+  ],
+  "repository": "https://github.com/primer/github-vscode-theme",
+  "license": "MIT",
+  "themes": [
+    "themes/github.json"
+  ]
+}

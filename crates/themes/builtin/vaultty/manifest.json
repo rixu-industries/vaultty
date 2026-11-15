@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "vaultty",
+  "name": "Vaultty",
+  "version": "1.0.0",
+  "description": "The default Vaultty themes.",
+  "authors": ["Vaultty"],
+  "license": "MIT",
+  "themes": ["themes/vaultty.json"]
+}

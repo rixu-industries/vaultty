@@ -1,0 +1,26 @@
+[package]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+name = "core"
+version.workspace = true
+edition.workspace = true
+
+# The package is named `core`, but the lib cannot be: it would clash with Rust's own `core` (derive macros like thiserror generate `::core::fmt`).
+[lib]
+name = "vault"
+doctest = false
+
+[dependencies]
+argon2 = { version = "0.5", features = ["zeroize"] }
+base64 = "0.22"
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+thiserror = "2"
+unicode-normalization = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+zeroize = { version = "1", features = ["derive"] }

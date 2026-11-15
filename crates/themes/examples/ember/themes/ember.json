@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rixu-industries/vaultty/main/crates/themes/schema/theme-v1.json",
+  "name": "Ember",
+  "author": "Vaultty",
+  "themes": [
+    {
+      "name": "Ember Dark",
+      "appearance": "dark",
+      "style": {
+        "background": "#1c1714",
+        "foreground": "#e8dccf",
+        "card": "#241d19",
+        "popover": "#2a221d",
+        "primary": "#f0883e",
+        "primary.foreground": "#1c1714",
+        "secondary": "#2e2520",
+        "muted.foreground": "#9c8b7c",
+        "accent": "#3a2e27",
+        "border": "#3a2e27",
+        "sidebar": "#201a16",
+        "sidebar.accent": "#4a3a30",
+
+        "terminal.background": "#16120f",
+        "terminal.ansi.red": "#e5534b",
+        "terminal.ansi.green": "#a5c261",
+        "terminal.ansi.yellow": "#e6b450",
+        "terminal.ansi.blue": "#6c99bb",
+        "terminal.ansi.magenta": "#c678dd",
+        "terminal.ansi.cyan": "#56b6c2"
+      }
+    },
+    {
+      "name": "Ember Light",
+      "appearance": "light",
+      "style": {
+        "background": "#fbf6f0",
+        "foreground": "#3b2f27",
+        "card": "#f3ebe2",
+        "primary": "#c2581b",
+        "primary.foreground": "#ffffff",
+        "accent": "#eadccd",
+        "border": "#e2d3c3",
+        "sidebar": "#f3ebe2",
+        "sidebar.accent": "#e3d2bf"
+      }
+    }
+  ]
+}

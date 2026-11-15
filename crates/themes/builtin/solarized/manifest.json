@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "solarized",
+  "name": "Solarized",
+  "version": "1.0.0",
+  "description": "Vaultty port of the Solarized themes that ship with VS Code.",
+  "authors": [
+    "Microsoft",
+    "Ethan Schoonover (original Solarized)"
+  ],
+  "repository": "https://github.com/microsoft/vscode",
+  "license": "MIT",
+  "themes": [
+    "themes/solarized.json"
+  ]
+}

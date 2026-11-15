@@ -1,0 +1,18 @@
+[files]
+ignore-hidden = false
+extend-exclude = [
+    # Version control metadata, not project text.
+    ".git/",
+    # Generated list of bundled third-party licenses; its text is not ours to fix.
+    "crates/desktop/assets/licenses.json",
+    # Third-party license texts copied verbatim from the upstream theme projects.
+    "crates/themes/builtin/*/LICENSE",
+    # License templates used to generate the licenses list; they contain upstream wording.
+    "crates/licenses/templates/",
+]
+
+[default.extend-words]
+# Test literal "caf\u{e9}" (café) in crates/core/src/vault.rs, deliberately not ASCII.
+caf = "caf"
+# Test literal in crates/mcp/src/server.rs.
+abd = "abd"

@@ -1,0 +1,15 @@
+[package]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+name = "updater"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+test = false
+
+[dependencies]
+cargo-packager-updater = "0.2"

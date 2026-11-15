@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/store",
+    "crates/ssh",
+    "crates/proxy",
+    "crates/vaults",
+    "crates/sftp",
+    "crates/terminal",
+    "crates/sessions",
+    "crates/settings",
+    "crates/themes",
+    "crates/mcp",
+    "crates/updater",
+    "crates/system",
+    "crates/desktop",
+    "crates/licenses",
+]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2024"
+license = "GPL-3.0-or-later"
+authors = ["José García \"Ruxwez\" (Rixu Industries)"]
+repository = "https://github.com/rixu-industries/vaultty"
+homepage = "https://rixu.dev"
+
+# Argon2 is unusably slow without optimizations, even in debug/tests.
+[profile.dev.package.argon2]
+opt-level = 3

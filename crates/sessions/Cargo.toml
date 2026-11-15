@@ -1,0 +1,20 @@
+[package]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+name = "sessions"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+proxy = { path = "../proxy" }
+sftp = { path = "../sftp" }
+ssh = { path = "../ssh" }
+terminal = { path = "../terminal" }
+tokio = { version = "1", features = ["sync", "macros", "rt", "time", "net"] }
+uuid = { version = "1", features = ["v4"] }
+vaults = { path = "../vaults" }

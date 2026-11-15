@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "gruvbox",
+  "name": "Gruvbox",
+  "version": "1.0.0",
+  "description": "Vaultty port of the Gruvbox theme for VS Code.",
+  "authors": [
+    "jdinhlife",
+    "Pavel Pertsev (original Gruvbox)"
+  ],
+  "repository": "https://github.com/jdinhlife/vscode-theme-gruvbox",
+  "license": "MIT",
+  "themes": [
+    "themes/gruvbox.json"
+  ]
+}

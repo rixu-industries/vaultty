@@ -1,0 +1,56 @@
+[package]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+name = "desktop"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "vaultty"
+path = "src/main.rs"
+
+[dependencies]
+# gpui-kit changes almost every week and has no semver: the exact version is pinned and updated on purpose.
+gpui-kit = "=0.8.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+futures = "0.3"
+mcp = { path = "../mcp" }
+system = { path = "../system" }
+rust-embed = "8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+settings = { path = "../settings" }
+sessions = { path = "../sessions" }
+sftp = { path = "../sftp" }
+terminal = { path = "../terminal" }
+themes = { path = "../themes" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+updater = { path = "../updater" }
+uuid = { version = "1", features = ["v4"] }
+vaults = { path = "../vaults" }
+
+[build-dependencies]
+winresource = "0.1"
+
+# Installer: `cargo packager --release` (cargo install cargo-packager).
+[package.metadata.packager]
+product-name = "Vaultty"
+identifier = "dev.rixu.vaultty"
+before-packaging-command = "cargo build --release -p desktop"
+out-dir = "../../target/installer"
+binaries = [{ path = "vaultty", main = true }]
+binaries-dir = "../../target/release"
+icons = ["assets/icons/icon.ico", "assets/icons/icon.icns", "assets/icons/png/*.png"]
+formats = ["nsis"]
+
+[package.metadata.packager.macos]
+# Ad-hoc signature ("-"): without an Apple Developer ID, it at least keeps Apple Silicon from
+# reporting the downloaded app as damaged. Gatekeeper still asks to allow it on first launch.
+signing-identity = "-"
+
+[package.metadata.packager.nsis]
+# No admin needed: the updater reinstalls without prompting for permissions.
+installer-mode = "currentUser"
+installer-icon = "assets/icons/icon.ico"

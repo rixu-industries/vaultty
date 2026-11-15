@@ -1,0 +1,254 @@
+name: Release
+
+# Publishes a new version every Monday, on its own, if main has app changes since the last
+# release and CI passed. It can also be run by hand from the Actions tab.
+#
+# Version: the higher of the Cargo.toml version and the last tag with the patch bumped. To ship a
+# minor or major, raise the version in Cargo.toml and the next release uses it. Nothing is
+# committed to main: the tag is the source of truth, and the version is applied at build time.
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and sign every package from the selected branch, without publishing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.dry_run && github.sha || 'main' }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        name: Decide whether and what to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice::$1"; echo "release=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          if [ "$DRY_RUN" = true ]; then
+            # A dry run builds whatever was selected, to test packaging before merging.
+            sha="$(git rev-parse HEAD)"
+          else
+            # The newest commit of main whose CI passed, not just the newest commit.
+            sha="$(gh run list --workflow run_tests.yml --branch main --event push --status success \
+              --limit 1 --json headSha --jq '.[0].headSha // empty')"
+            [ -n "$sha" ] || skip "No commit on main has passed CI yet"
+          fi
+
+          base="$(git show "$sha:Cargo.toml" | sed -n 's/^version = "\([^"]*\)".*/\1/p' | head -n1)"
+          last="$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+
+          if [ -n "$last" ]; then
+            # Docs, CI or script changes alone do not ship an update to users.
+            if [ "$DRY_RUN" != true ] && git diff --quiet "$last" "$sha" -- crates Cargo.toml Cargo.lock; then
+              skip "No app changes since $last"
+            fi
+            IFS=. read -r major minor patch <<< "${last#v}"
+            version="$(printf '%s\n%s\n' "$base" "$major.$minor.$((patch + 1))" | sort -V | tail -n1)"
+          else
+            version="$base"
+          fi
+
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Invalid version '$version'"; exit 1; }
+          echo "::notice::Releasing v$version from $sha (previous: ${last:-none})"
+          {
+            echo "release=true"
+            echo "version=$version"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
+    strategy:
+      fail-fast: true
+      matrix:
+        # Each platform gets the package its updater can install: AppImage on Linux, the .app
+        # (as .app.tar.gz) on macOS plus a .dmg for the first install, and NSIS on Windows.
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            formats: appimage
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            formats: appimage
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            formats: app,dmg
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            formats: app,dmg
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            formats: nsis
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            formats: nsis
+    # Every runner is native for its target, so there is no --target and the binary is in target/release.
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      FORMATS: ${{ matrix.formats }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: ./scripts/linux
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      # No cache on purpose: what gets published must not depend on a cache that other workflows write.
+      - name: Set the release version
+        shell: pwsh
+        run: |
+          $toml = Get-Content Cargo.toml -Raw
+          $toml = $toml -replace '(?m)^version = "[^"]*"', "version = `"$env:VERSION`""
+          [IO.File]::WriteAllText("$PWD/Cargo.toml", $toml)
+          cargo update --workspace
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $actual = ((cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages |
+            Where-Object name -eq desktop).version
+          if ($actual -ne $env:VERSION) { throw "Version is '$actual', expected '$env:VERSION'" }
+      - run: cargo build --locked --release -p desktop
+      - name: Install cargo-packager
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-packager
+      - name: Build signed packages
+        shell: bash
+        working-directory: crates/desktop
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ -n "$CARGO_PACKAGER_SIGN_PRIVATE_KEY" ] || { echo "::error::Missing CARGO_PACKAGER_SIGN_PRIVATE_KEY secret"; exit 1; }
+          args=(--release --formats "$FORMATS")
+          # With no password, `--password=` keeps it from waiting for someone to type one.
+          [ -n "$CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD" ] || args+=(--password=)
+          cargo packager "${args[@]}"
+      - name: Collect packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=target/installer
+          mkdir dist
+          # The names here must match the table in the publish job. cargo-packager names the macOS
+          # bundle Vaultty.app, so its archive gets the version and architecture added.
+          case "$TARGET" in
+            x86_64-unknown-linux-gnu)  cp "$out/vaultty_${VERSION}_x86_64.AppImage"{,.sig} dist/ ;;
+            aarch64-unknown-linux-gnu) cp "$out/vaultty_${VERSION}_aarch64.AppImage"{,.sig} dist/ ;;
+            x86_64-pc-windows-msvc)    cp "$out/vaultty_${VERSION}_x64-setup.exe"{,.sig} dist/ ;;
+            aarch64-pc-windows-msvc)   cp "$out/vaultty_${VERSION}_arm64-setup.exe"{,.sig} dist/ ;;
+            *-apple-darwin)
+              arch=$([ "$TARGET" = x86_64-apple-darwin ] && echo x64 || echo aarch64)
+              cp "$out/Vaultty_${VERSION}_${arch}.dmg" dist/
+              cp "$out/Vaultty.app.tar.gz" "dist/Vaultty_${VERSION}_${arch}.app.tar.gz"
+              cp "$out/Vaultty.app.tar.gz.sig" "dist/Vaultty_${VERSION}_${arch}.app.tar.gz.sig"
+              ;;
+          esac
+          ls -l dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vaultty-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+
+          # Notes from the PRs merged since the previous release.
+          gh api "repos/$GH_REPO/releases/generate-notes" -f tag_name="$tag" -f target_commitish="$SHA" \
+            --jq .body > notes.md
+
+          # The updater reads this file from the latest release; only what is signed is installed.
+          # Each line: updater platform (<os>-<arch> as cargo-packager-updater names it), format, file.
+          platforms='{}'
+          while read -r key format file; do
+            [ -s "dist/$file.sig" ] || { echo "::error::Missing $file or its signature"; exit 1; }
+            platforms="$(jq -c \
+              --arg key "$key" --arg format "$format" \
+              --arg url "https://github.com/$GH_REPO/releases/download/$tag/$file" \
+              --rawfile signature "dist/$file.sig" \
+              '. + {($key): {url: $url, signature: ($signature | rtrimstr("\n") | rtrimstr("\r")), format: $format}}' \
+              <<< "$platforms")"
+          done <<EOF
+          linux-x86_64    appimage vaultty_${VERSION}_x86_64.AppImage
+          linux-aarch64   appimage vaultty_${VERSION}_aarch64.AppImage
+          macos-x86_64    app      Vaultty_${VERSION}_x64.app.tar.gz
+          macos-aarch64   app      Vaultty_${VERSION}_aarch64.app.tar.gz
+          windows-x86_64  nsis     vaultty_${VERSION}_x64-setup.exe
+          windows-aarch64 nsis     vaultty_${VERSION}_arm64-setup.exe
+          EOF
+
+          jq -n \
+            --arg version "$VERSION" \
+            --rawfile notes notes.md \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson platforms "$platforms" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
+            > dist/latest.json
+
+          if [ "$DRY_RUN" = true ]; then
+            cat dist/latest.json
+            echo "::notice::Dry run: every package was built and signed; nothing was published"
+            exit 0
+          fi
+
+          # A draft left by a failed run is discarded; a published release with this tag makes this fail.
+          if [ "$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || true)" = "true" ]; then
+            gh release delete "$tag" --yes
+          fi
+
+          # Created as a draft so that neither users nor the updater see a half-uploaded release.
+          gh release create "$tag" --draft --target "$SHA" --title "Vaultty $VERSION" --notes-file notes.md dist/*
+          gh release edit "$tag" --draft=false --latest

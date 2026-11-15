@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "dracula",
+  "name": "Dracula",
+  "version": "1.0.0",
+  "description": "Vaultty port of the Dracula colors for VS Code.",
+  "authors": [
+    "Dracula Theme"
+  ],
+  "repository": "https://github.com/dracula/visual-studio-code",
+  "license": "MIT",
+  "themes": [
+    "themes/dracula.json"
+  ]
+}

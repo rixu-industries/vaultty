@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "id": "ember",
+  "name": "Ember",
+  "version": "1.0.0",
+  "description": "Warm dark and light themes. An example of a community theme package.",
+  "authors": ["Vaultty"],
+  "repository": "https://github.com/rixu-industries/vaultty",
+  "license": "MIT",
+  "themes": ["themes/ember.json"]
+}

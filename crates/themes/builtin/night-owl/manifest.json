@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "night-owl",
+  "name": "Night Owl",
+  "version": "1.0.0",
+  "description": "Vaultty port of the Night Owl colors for VS Code.",
+  "authors": [
+    "Sarah Drasner"
+  ],
+  "repository": "https://github.com/sdras/night-owl-vscode-theme",
+  "license": "MIT",
+  "themes": [
+    "themes/night-owl.json"
+  ]
+}

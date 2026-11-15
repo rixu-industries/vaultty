@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "tokyo-night",
+  "name": "Tokyo Night",
+  "version": "1.0.0",
+  "description": "Vaultty port of the Tokyo Night colors for VS Code.",
+  "authors": [
+    "enkia"
+  ],
+  "repository": "https://github.com/enkia/tokyo-night-vscode-theme",
+  "license": "MIT",
+  "themes": [
+    "themes/tokyo-night.json"
+  ]
+}

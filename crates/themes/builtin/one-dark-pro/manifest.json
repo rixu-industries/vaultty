@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "one-dark-pro",
+  "name": "One Dark Pro",
+  "version": "1.0.0",
+  "description": "Vaultty port of the One Dark Pro colors for VS Code.",
+  "authors": [
+    "binaryify"
+  ],
+  "repository": "https://github.com/Binaryify/OneDark-Pro",
+  "license": "MIT",
+  "themes": [
+    "themes/one-dark-pro.json"
+  ]
+}

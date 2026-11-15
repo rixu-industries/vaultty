@@ -1,0 +1,77 @@
+name: retry_runner_outages
+
+# GitHub cancels a job when it cannot find a hosted runner for it (it happens often with macOS),
+# and the run shows up as failed. This reruns those runs on its own, with a growing wait between
+# attempts, so a run ends up executing even if the runners are unavailable for days. A run where
+# something actually failed is never retried, and only the newest run of each workflow and branch
+# is: a newer push replaces it.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retry_runner_outages
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      checks: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      # With the wait below (10 minutes more per attempt, at most 2 hours) this covers about 70 hours.
+      MAX_ATTEMPTS: 40
+    steps:
+      - name: Rerun runs cancelled for lack of a runner
+        run: |
+          set -euo pipefail
+          now="$(date -u +%s)"
+
+          # The newest run of each watched workflow and branch, if it ended without success.
+          gh api --paginate -X GET "repos/$GH_REPO/actions/runs" \
+            -f created=">=$(date -u -d '5 days ago' +%Y-%m-%d)" -f per_page=100 --jq '.workflow_runs[]' |
+            jq -s -r '
+              map(select(.path == ".github/workflows/run_tests.yml" or .path == ".github/workflows/release.yml"))
+              | group_by([.workflow_id, .head_branch]) | map(max_by(.created_at)) | .[]
+              | select(.status == "completed" and (.conclusion == "failure" or .conclusion == "cancelled"))
+              | "\(.id) \(.run_attempt) \(.updated_at) \(.name) \(.head_branch)"' |
+            while read -r id attempt updated name branch; do
+              jobs="$(gh api "repos/$GH_REPO/actions/runs/$id/attempts/$attempt/jobs?per_page=100" --jq '.jobs')"
+
+              # A real failure (tests_pass only reports the others) means there is nothing to retry.
+              if jq -e 'any(.[]; .conclusion == "failure" and .name != "tests_pass")' <<< "$jobs" > /dev/null; then
+                continue
+              fi
+
+              # Jobs that never got a runner: cancelled before running any step.
+              outage=false
+              for job in $(jq -r '.[] | select(.conclusion == "cancelled" and (.steps | length) == 0) | .id' <<< "$jobs"); do
+                if gh api "repos/$GH_REPO/check-runs/$job/annotations" --jq '.[].message' |
+                  grep -q "not acquired by Runner"; then
+                  outage=true
+                  break
+                fi
+              done
+              [ "$outage" = true ] || continue
+
+              if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+                echo "::warning::$name on $branch (run $id) still had no runner after $attempt attempts; giving up"
+                continue
+              fi
+              wait_minutes=$(( attempt * 10 > 120 ? 120 : attempt * 10 ))
+              if [ $(( now - $(date -u -d "$updated" +%s) )) -lt $(( wait_minutes * 60 )) ]; then
+                echo "$name on $branch (run $id): waiting $wait_minutes minutes since the last attempt"
+                continue
+              fi
+
+              echo "::notice::Rerunning $name on $branch (run $id, attempt $((attempt + 1))): no runner was available"
+              gh run rerun "$id" --failed || echo "::warning::Could not rerun run $id"
+            done

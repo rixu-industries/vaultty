@@ -1,0 +1,13 @@
+# CI-only cargo config. Cargo does not read this file for local builds because it is not named config.toml.
+# CI copies it to ./../.cargo/config.toml, outside the checkout, so cargo finds it as an ancestor config.
+# The repo has no .cargo/config.toml of its own, so nothing is merged with it.
+#
+# -D warnings is set here rather than in the RUSTFLAGS environment variable, which would override every
+# other rustflags setting (https://github.com/rust-lang/cargo/issues/5376). It is under
+# [target.'cfg(all())'] rather than [build] because that table is guaranteed to be cumulative.
+[target.'cfg(all())']
+rustflags = ["-D", "warnings"]
+
+# Tests and other dev builds do not need full debug info in CI.
+[profile.dev]
+debug = "limited"

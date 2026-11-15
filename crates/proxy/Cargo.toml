@@ -1,0 +1,17 @@
+[package]
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+name = "proxy"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+tokio = { version = "1", features = ["net", "io-util", "rt", "time", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["net", "io-util", "rt", "time", "macros"] }

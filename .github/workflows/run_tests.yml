@@ -1,0 +1,485 @@
+name: run_tests
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  CARGO_INCREMENTAL: '0'
+on:
+  pull_request:
+    branches:
+    - '**'
+  push:
+    branches:
+    - main
+permissions:
+  contents: read
+jobs:
+  orchestrate:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        fetch-depth: ${{ github.ref == 'refs/heads/main' && 2 || 350 }}
+        persist-credentials: false
+    - id: filter
+      name: Decide which jobs to run
+      run: |
+        set -euo pipefail
+        if [ -z "$GITHUB_BASE_REF" ]; then
+          echo "Not in a PR context (i.e., push to main)"
+          COMPARE_REV="$(git rev-parse HEAD~1)"
+        else
+          echo "In a PR context comparing to pull_request.base.ref"
+          git fetch origin "$GITHUB_BASE_REF" --depth=350
+          COMPARE_REV="$(git merge-base "origin/${GITHUB_BASE_REF}" HEAD)"
+        fi
+        CHANGED_FILES="$(git diff --name-only "$COMPARE_REV" "$GITHUB_SHA")"
+
+        check_pattern() {
+          local output_name="$1"
+          local pattern="$2"
+          local grep_arg="$3"
+
+          echo "$CHANGED_FILES" | grep "$grep_arg" "$pattern" && \
+            echo "${output_name}=true" >> "$GITHUB_OUTPUT" || \
+            echo "${output_name}=false" >> "$GITHUB_OUTPUT"
+        }
+
+        # Changes to these files affect every package, so run the whole suite (no package filter).
+        # Direct pushes to main always run the full suite.
+        if [ -z "$GITHUB_BASE_REF" ]; then
+          echo "Not a PR, running full test suite"
+          echo "changed_packages=" >> "$GITHUB_OUTPUT"
+        elif echo "$CHANGED_FILES" | grep -qP '^(\.cargo/|\.config/|\.github/|scripts/linux|Cargo\.(toml|lock)$|deny\.toml$)'; then
+          echo "Toolchain, CI config, or workspace-level files changed, will run all tests"
+          echo "changed_packages=" >> "$GITHUB_OUTPUT"
+        else
+          # Map crates/<dir> to the package name from cargo metadata. A directory without a
+          # workspace package is skipped, so if nothing maps, the full suite runs below.
+          CHANGED_DIRS=$(echo "$CHANGED_FILES" | \
+            grep -oP '^crates/\K[^/]+' | \
+            sort -u || true)
+
+          DIR_TO_PKG=$(cargo metadata --format-version=1 --no-deps 2>/dev/null | \
+            jq -r '.packages[] | select(.manifest_path | test("crates/")) | "\(.manifest_path | capture("crates/(?<dir>[^/]+)") | .dir)=\(.name)"')
+
+          FILE_CHANGED_PKGS=""
+          for dir in $CHANGED_DIRS; do
+            pkg=$(echo "$DIR_TO_PKG" | grep "^${dir}=" | cut -d= -f2 | head -1 || true)
+            if [ -n "$pkg" ]; then
+              FILE_CHANGED_PKGS=$(printf '%s\n%s' "$FILE_CHANGED_PKGS" "$pkg")
+            fi
+          done
+          ALL_CHANGED_PKGS=$(echo "$FILE_CHANGED_PKGS" | grep -v '^$' | sort -u || true)
+
+          if [ -z "$ALL_CHANGED_PKGS" ]; then
+            echo "No package changes detected, will run all tests"
+            echo "changed_packages=" >> "$GITHUB_OUTPUT"
+          else
+            FILTERSET=$(echo "$ALL_CHANGED_PKGS" | \
+              sed 's/.*/rdeps(&)/' | \
+              tr '\n' '|' | \
+              sed 's/|$//')
+            echo "Changed packages filterset: $FILTERSET"
+            echo "changed_packages=$FILTERSET" >> "$GITHUB_OUTPUT"
+          fi
+        fi
+
+        check_pattern "run_action_checks" '^\.github/(workflows/|actions/)|^scripts/' -qP
+        check_pattern "run_licenses" '^(Cargo\.lock$|deny\.toml$|crates/licenses/|crates/themes/builtin/)' -qP
+        # Only docs, license texts and issue templates skip the test jobs.
+        check_pattern "run_tests" '^(.*\.md$|LICENSE$|\.github/ISSUE_TEMPLATE/)' -qvP
+    outputs:
+      changed_packages: ${{ steps.filter.outputs.changed_packages }}
+      run_action_checks: ${{ steps.filter.outputs.run_action_checks }}
+      run_licenses: ${{ steps.filter.outputs.run_licenses }}
+      run_tests: ${{ steps.filter.outputs.run_tests }}
+    timeout-minutes: 60
+  check_style:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Install Rust toolchain with rustfmt
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+        components: rustfmt
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Check for TODO markers
+      run: ./scripts/check-todos
+    - name: Check for typos
+      uses: crate-ci/typos@276087d9a4f06398b3e04825487805e2d7375888 # v1.52.2
+      with:
+        config: ./.config/typos.toml
+    timeout-minutes: 60
+  clippy_linux:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_tests == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Set up CI cargo config
+      run: |
+        mkdir -p ./../.cargo
+        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
+    - name: Install Rust toolchain with clippy
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+        components: clippy
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        # Only main saves the cache, so every PR starts from main's build instead of a cold one.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - name: Install Linux dependencies
+      run: ./scripts/linux
+    - name: Run clippy
+      run: ./scripts/clippy
+    timeout-minutes: 60
+  clippy_windows:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_tests == 'true'
+    runs-on: windows-2022
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Set up CI cargo config
+      run: |
+        New-Item -ItemType Directory -Path "./../.cargo" -Force
+        Copy-Item -Path "./.cargo/ci-config.toml" -Destination "./../.cargo/config.toml"
+      shell: pwsh
+    - name: Install Rust toolchain with clippy
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+        components: clippy
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        # Only main saves the cache, so every PR starts from main's build instead of a cold one.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - name: Run clippy
+      run: ./scripts/clippy.ps1
+      shell: pwsh
+    timeout-minutes: 60
+  clippy_mac:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_tests == 'true'
+    runs-on: macos-15
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Set up CI cargo config
+      run: |
+        mkdir -p ./../.cargo
+        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
+    - name: Install Rust toolchain with clippy
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+        components: clippy
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        # Only main saves the cache, so every PR starts from main's build instead of a cold one.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - name: Run clippy
+      run: ./scripts/clippy
+    timeout-minutes: 60
+  run_tests_linux:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_tests == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Set up CI cargo config
+      run: |
+        mkdir -p ./../.cargo
+        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        # Only main saves the cache, so every PR starts from main's build instead of a cold one.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - name: Install Linux dependencies
+      run: ./scripts/linux
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: nextest
+    - name: Run tests
+      env:
+        CHANGED_PACKAGES: ${{ needs.orchestrate.outputs.changed_packages }}
+      run: |
+        args=()
+        if [[ -n "$CHANGED_PACKAGES" ]]; then
+          args=(-E "$CHANGED_PACKAGES")
+        fi
+        cargo nextest run --workspace --locked --no-fail-fast --no-tests=warn ${args[@]+"${args[@]}"}
+    - name: Clean up CI cargo config
+      if: always()
+      run: |
+        rm -rf ./../.cargo
+    timeout-minutes: 60
+  run_tests_windows:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_tests == 'true'
+    runs-on: windows-2022
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Set up CI cargo config
+      run: |
+        New-Item -ItemType Directory -Path "./../.cargo" -Force
+        Copy-Item -Path "./.cargo/ci-config.toml" -Destination "./../.cargo/config.toml"
+      shell: pwsh
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        # Only main saves the cache, so every PR starts from main's build instead of a cold one.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: nextest
+    - name: Run tests
+      env:
+        CHANGED_PACKAGES: ${{ needs.orchestrate.outputs.changed_packages }}
+      run: |
+        $extra = @()
+        if ($env:CHANGED_PACKAGES) { $extra = @('-E', $env:CHANGED_PACKAGES) }
+        cargo nextest run --workspace --locked --no-fail-fast --no-tests=warn @extra
+      shell: pwsh
+    - name: Clean up CI cargo config
+      if: always()
+      run: |
+        Remove-Item -Recurse -Path "./../.cargo" -Force -ErrorAction SilentlyContinue
+      shell: pwsh
+    timeout-minutes: 60
+  run_tests_mac:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_tests == 'true'
+    runs-on: macos-15
+    env:
+      RUST_LIB_BACKTRACE: '0'
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Set up CI cargo config
+      run: |
+        mkdir -p ./../.cargo
+        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        # Only main saves the cache, so every PR starts from main's build instead of a cold one.
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: nextest
+    - name: Run tests
+      env:
+        CHANGED_PACKAGES: ${{ needs.orchestrate.outputs.changed_packages }}
+      run: |
+        args=()
+        if [[ -n "$CHANGED_PACKAGES" ]]; then
+          args=(-E "$CHANGED_PACKAGES")
+        fi
+        cargo nextest run --workspace --locked --no-fail-fast --no-tests=warn ${args[@]+"${args[@]}"}
+    - name: Clean up CI cargo config
+      if: always()
+      run: |
+        rm -rf ./../.cargo
+    timeout-minutes: 60
+  check_dependencies:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_tests == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+    - name: Install cargo-shear
+      uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: cargo-shear@1.13.4
+    - name: Check for unused dependencies
+      run: cargo shear --locked --deny-warnings --check-test-targets
+    - name: Check that Cargo.lock is up to date
+      run: cargo update --locked --workspace
+    - name: Check for vulnerable dependencies
+      if: github.event_name == 'pull_request'
+      uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      with:
+        license-check: false
+    timeout-minutes: 60
+  check_licenses:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_licenses == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+    - name: Install cargo-deny
+      uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      with:
+        tool: cargo-deny
+    - name: Check licenses
+      run: cargo deny --locked check licenses
+    timeout-minutes: 60
+  check_scripts:
+    needs:
+    - orchestrate
+    - check_style
+    if: needs.orchestrate.outputs.run_action_checks == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        clean: false
+        persist-credentials: false
+    - name: Run shellcheck on scripts
+      run: ./scripts/shellcheck-scripts error
+    - id: get_actionlint
+      name: Download actionlint
+      # The download script is pinned to the commit of the v1.7.12 tag, and it downloads that same version.
+      run: bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/914e7df21a07ef503a81201c76d2b11c789d3fca/scripts/download-actionlint.bash) 1.7.12
+    - name: Run actionlint
+      run: '"$ACTIONLINT_BIN" -color'
+      env:
+        ACTIONLINT_BIN: ${{ steps.get_actionlint.outputs.executable }}
+    - name: Run zizmor
+      uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+      with:
+        advanced-security: false
+        min-severity: high
+        version: latest
+    timeout-minutes: 60
+  tests_pass:
+    needs:
+    - orchestrate
+    - check_style
+    - clippy_windows
+    - clippy_linux
+    - clippy_mac
+    - run_tests_windows
+    - run_tests_linux
+    - run_tests_mac
+    - check_dependencies
+    - check_licenses
+    - check_scripts
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Check results
+      run: |
+        set +x
+        EXIT_CODE=0
+
+        check_result() {
+          echo "* $1: $2"
+          if [[ "$2" != "skipped" && "$2" != "success" ]]; then EXIT_CODE=1; fi
+        }
+
+        check_result "orchestrate" "$RESULT_ORCHESTRATE"
+        check_result "check_style" "$RESULT_CHECK_STYLE"
+        check_result "clippy_windows" "$RESULT_CLIPPY_WINDOWS"
+        check_result "clippy_linux" "$RESULT_CLIPPY_LINUX"
+        check_result "clippy_mac" "$RESULT_CLIPPY_MAC"
+        check_result "run_tests_windows" "$RESULT_RUN_TESTS_WINDOWS"
+        check_result "run_tests_linux" "$RESULT_RUN_TESTS_LINUX"
+        check_result "run_tests_mac" "$RESULT_RUN_TESTS_MAC"
+        check_result "check_dependencies" "$RESULT_CHECK_DEPENDENCIES"
+        check_result "check_licenses" "$RESULT_CHECK_LICENSES"
+        check_result "check_scripts" "$RESULT_CHECK_SCRIPTS"
+
+        exit $EXIT_CODE
+      env:
+        RESULT_ORCHESTRATE: ${{ needs.orchestrate.result }}
+        RESULT_CHECK_STYLE: ${{ needs.check_style.result }}
+        RESULT_CLIPPY_WINDOWS: ${{ needs.clippy_windows.result }}
+        RESULT_CLIPPY_LINUX: ${{ needs.clippy_linux.result }}
+        RESULT_CLIPPY_MAC: ${{ needs.clippy_mac.result }}
+        RESULT_RUN_TESTS_WINDOWS: ${{ needs.run_tests_windows.result }}
+        RESULT_RUN_TESTS_LINUX: ${{ needs.run_tests_linux.result }}
+        RESULT_RUN_TESTS_MAC: ${{ needs.run_tests_mac.result }}
+        RESULT_CHECK_DEPENDENCIES: ${{ needs.check_dependencies.result }}
+        RESULT_CHECK_LICENSES: ${{ needs.check_licenses.result }}
+        RESULT_CHECK_SCRIPTS: ${{ needs.check_scripts.result }}
+    timeout-minutes: 60
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.ref_name == 'main' && github.sha || 'anysha' }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash -euxo pipefail {0}

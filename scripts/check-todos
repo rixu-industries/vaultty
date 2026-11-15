@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 José García "Ruxwez" (Rixu Industries)
+
+set -euo pipefail
+
+# Brackets are used around characters so these don't show up in normal search.
+pattern='tod[o]!|FIXM[E]'
+result=$(git grep --no-color --ignore-case --line-number --extended-regexp -e "$pattern" || true)
+if [[ -n "${result}" ]]; then
+  echo "${result}"
+  exit 1
+fi

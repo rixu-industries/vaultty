@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "monokai",
+  "name": "Monokai",
+  "version": "1.0.0",
+  "description": "Vaultty port of the Monokai theme that ships with VS Code.",
+  "authors": [
+    "Microsoft",
+    "Wimer Hazenberg (original Monokai)"
+  ],
+  "repository": "https://github.com/microsoft/vscode",
+  "license": "MIT",
+  "themes": [
+    "themes/monokai.json"
+  ]
+}

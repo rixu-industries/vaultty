@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "nord",
+  "name": "Nord",
+  "version": "1.0.0",
+  "description": "Vaultty port of the Nord colors for VS Code.",
+  "authors": [
+    "Arctic Ice Studio"
+  ],
+  "repository": "https://www.nordtheme.com",
+  "license": "MIT",
+  "themes": [
+    "themes/nord.json"
+  ]
+}
