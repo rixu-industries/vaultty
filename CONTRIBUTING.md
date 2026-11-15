@@ -2,6 +2,10 @@
 
 Thanks for helping. Open an issue before starting anything large to agree on the approach.
 
+## AI-generated contributions
+
+Using AI tools (code assistants, chatbots, agents) is allowed. You remain the author of the change: a human must review every line you submit, and you must understand the code and how it works. Do not open a pull request with generated code you have not read or cannot explain.
+
 ## Before submitting a change
 
 ```sh
