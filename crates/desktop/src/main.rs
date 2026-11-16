@@ -121,6 +121,18 @@ fn main() {
         })
         .detach();
 
+        // The anonymous "this installation is running" ping, now and once a day while open.
+        cx.spawn(async move |cx| {
+            loop {
+                cx.background_executor()
+                    .spawn(async { telemetry::ping() })
+                    .await;
+
+                cx.background_executor().timer(telemetry::EVERY).await;
+            }
+        })
+        .detach();
+
         state.update(cx, |s, cx| {
             s.auto_unlock_all(cx);
             s.check_update(cx);

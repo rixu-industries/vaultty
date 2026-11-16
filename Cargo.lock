@@ -1875,6 +1875,7 @@ dependencies = [
  "settings",
  "sftp",
  "system",
+ "telemetry",
  "terminal",
  "themes",
  "tokio",
@@ -8760,6 +8761,18 @@ dependencies = [
  "thiserror 2.0.21",
  "windows 0.62.2",
  "windows-version",
+]
+
+[[package]]
+name = "telemetry"
+version = "0.1.1"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "settings",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

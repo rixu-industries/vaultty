@@ -15,6 +15,8 @@ pub struct Prefs {
     pub appearance: AppearanceSettings,
     pub terminal: terminal::Settings,
     pub general: system::Settings,
+    /// Whether the anonymous ping is allowed.
+    pub telemetry: bool,
     /// The system one, which takes effect in `System` mode.
     pub system: Appearance,
 }
@@ -36,6 +38,7 @@ impl Prefs {
             appearance: AppearanceSettings::load(),
             terminal: terminal::Settings::load(),
             general: system::Settings::load(),
+            telemetry: telemetry::enabled(),
             system: appearance_of(cx.window_appearance()),
         };
 
@@ -83,6 +86,12 @@ impl Prefs {
         settings.save()?;
         cx.global_mut::<Prefs>().general = settings;
         shell::sync_tray(cx);
+        Ok(())
+    }
+
+    pub fn set_telemetry(on: bool, cx: &mut App) -> Result<(), String> {
+        telemetry::set_enabled(on)?;
+        cx.global_mut::<Prefs>().telemetry = on;
         Ok(())
     }
 

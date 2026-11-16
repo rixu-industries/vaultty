@@ -18,7 +18,7 @@ full, before editing; they are short.
 
 - `crates/core` (lib `vault`), `store`, `vaults`: the encrypted vault, from the format up to its operations.
 - `crates/ssh`, `sftp`, `proxy`, `terminal`: one protocol each. `crates/sessions`: tabs, tunnels, connections.
-- `crates/mcp`: the MCP server. `crates/settings`, `themes`, `updater`, `system`: app support.
+- `crates/mcp`: the MCP server. `crates/settings`, `themes`, `updater`, `system`, `telemetry`: app support.
 - `crates/desktop`: the UI, and only the UI. `crates/licenses`: development tool.
 
 ## Commands

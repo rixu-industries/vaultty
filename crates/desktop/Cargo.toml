@@ -27,6 +27,7 @@ sftp = { path = "../sftp" }
 terminal = { path = "../terminal" }
 themes = { path = "../themes" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
+telemetry = { path = "../telemetry" }
 updater = { path = "../updater" }
 uuid = { version = "1", features = ["v4"] }
 vaults = { path = "../vaults" }
@@ -57,3 +58,5 @@ signing-identity = "-"
 # No admin needed: the updater reinstalls without prompting for permissions.
 installer-mode = "currentUser"
 installer-icon = "assets/icons/icon.ico"
+# cargo-packager's own template plus the privacy page with the telemetry opt-out.
+template = "installer/installer.nsi"

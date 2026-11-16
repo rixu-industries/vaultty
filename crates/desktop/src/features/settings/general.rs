@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 José García "Ruxwez" (Rixu Industries)
 
-//! "General" category: launching with the computer and what the close button does.
+//! "General" category: launching with the computer, what the close button does and telemetry.
 
 use crate::app::prefs::Prefs;
 use crate::app::theme::colors;
@@ -24,13 +24,20 @@ impl GeneralSettings {
         self.error = Prefs::set_general(settings, cx).err();
         cx.notify();
     }
+
+    fn set_telemetry(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.error = Prefs::set_telemetry(on, cx).err();
+        cx.notify();
+    }
 }
 
 impl Render for GeneralSettings {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors();
         let settings = Prefs::get(cx).general.clone();
+        let telemetry = Prefs::get(cx).telemetry;
         let (on_login, on_hidden, on_tray) = (cx.entity(), cx.entity(), cx.entity());
+        let on_telemetry = cx.entity();
 
         let (tray, close) = if cfg!(target_os = "macos") {
             ("the menu bar", "Close to menu bar")
@@ -71,6 +78,16 @@ impl Render for GeneralSettings {
                     .checked(settings.close_to_tray)
                     .on_click(move |on, _, cx| {
                         on_tray.update(cx, |t, cx| t.update(cx, |s| s.close_to_tray = *on));
+                    }),
+            ))
+            .child(setting(
+                "Send anonymous usage statistics",
+                "Once a day, tell Rixu Industries that a copy of this version is running on this \
+                 operating system. Nothing about you, your hosts or your vaults is sent.",
+                Switch::new("telemetry", "Send anonymous usage statistics")
+                    .checked(telemetry)
+                    .on_click(move |on, _, cx| {
+                        on_telemetry.update(cx, |t, cx| t.set_telemetry(*on, cx));
                     }),
             ))
     }
