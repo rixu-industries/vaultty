@@ -73,5 +73,7 @@ jobs:
               fi
 
               echo "::notice::Rerunning $name on $branch (run $id, attempt $((attempt + 1))): no runner was available"
-              gh run rerun "$id" --failed || echo "::warning::Could not rerun run $id"
+              # A whole rerun, not `--failed`: that one does not queue a job that never got a runner again, it
+              # only repeats tests_pass with the same cancelled result.
+              gh run rerun "$id" || echo "::warning::Could not rerun run $id"
             done
