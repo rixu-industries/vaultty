@@ -50,6 +50,10 @@ It needs the `CARGO_PACKAGER_SIGN_PRIVATE_KEY` secret with the contents of the p
 
 The logic lives in independent crates (`core`, `vaults`, `sessions`, `ssh`, `sftp`, `terminal`, `proxy`, `store`, `settings`, `themes`, `mcp`, `updater`); `crates/desktop` is only the UI.
 
+## Privacy
+
+Vaultty sends one anonymous message a day to count installations in use: a random identifier, the version and the operating system, and nothing about you or your vaults. Turn it off in the Windows installer or in Settings → General. The details are in [PRIVACY.md](PRIVACY.md).
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md). AI tools are allowed if a human has reviewed the generated code and understands it. To report a vulnerability, see [SECURITY.md](SECURITY.md).
