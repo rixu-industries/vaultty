@@ -126,7 +126,7 @@ jobs:
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: ./scripts/linux
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: stable
       # No cache on purpose: what gets published must not depend on a cache that other workflows write.
