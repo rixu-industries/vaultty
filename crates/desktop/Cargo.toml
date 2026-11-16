@@ -38,6 +38,9 @@ winresource = "0.1"
 [package.metadata.packager]
 product-name = "Vaultty"
 identifier = "dev.rixu.vaultty"
+# Without this, cargo-packager takes the publisher from the identifier ("rixu"), which is what
+# Apps & features and the uninstall lists show as the editor.
+publisher = "Rixu Industries"
 before-packaging-command = "cargo build --release -p desktop"
 out-dir = "../../target/installer"
 binaries = [{ path = "vaultty", main = true }]
