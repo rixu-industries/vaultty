@@ -9,6 +9,8 @@ extend-exclude = [
     "crates/themes/builtin/*/LICENSE",
     # License templates used to generate the licenses list; they contain upstream wording.
     "crates/licenses/templates/",
+    # NSIS script copied from cargo-packager: its instructions (`StrCpy`…) are not words.
+    "crates/desktop/installer/installer.nsi",
 ]
 
 [default.extend-words]
